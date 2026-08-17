@@ -16,8 +16,9 @@ type Summary struct {
 }
 
 // BuildSummary extracts the main entrée choices from a DayMenu, filtering out
-// standing alternatives (e.g. Sun Butter & Jelly Sandwich) that appear every day.
-func BuildSummary(day DayMenu, schoolName string) Summary {
+// items matching any of the provided exclusion patterns (case-insensitive substring match).
+// Pass nil exclusions to skip filtering.
+func BuildSummary(day DayMenu, schoolName string, exclusions []string) Summary {
 	opts := day.OptionSections()
 	names := make([]string, 0, len(opts))
 	for _, sec := range opts {
@@ -25,7 +26,7 @@ func BuildSummary(day DayMenu, schoolName string) Summary {
 			continue
 		}
 		first := sec.Foods[0].Name
-		if isSunButter(first) {
+		if isExcluded(first, exclusions) {
 			continue
 		}
 		names = append(names, first)
@@ -39,10 +40,15 @@ func BuildSummary(day DayMenu, schoolName string) Summary {
 	}
 }
 
-// isSunButter reports whether a food name is a sun butter item — a standing
-// daily alternative at Woodmen Roberts that isn't a real rotating choice.
-func isSunButter(name string) bool {
-	return strings.Contains(strings.ToLower(name), "sun butter")
+// isExcluded reports whether name contains any of the exclusion patterns (case-insensitive).
+func isExcluded(name string, exclusions []string) bool {
+	lower := strings.ToLower(name)
+	for _, pat := range exclusions {
+		if strings.Contains(lower, strings.ToLower(pat)) {
+			return true
+		}
+	}
+	return false
 }
 
 // joinOptions formats a slice of option names into natural English.

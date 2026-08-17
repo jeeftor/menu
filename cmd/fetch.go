@@ -27,12 +27,14 @@ Examples:
 func init() {
 	fetchCmd.Flags().String("month", "", "month to fetch in YYYY-MM format (default: current month)")
 	fetchCmd.Flags().String("school", "", "school name or slug (default: Woodmen Roberts)")
+	fetchCmd.Flags().String("meal", "lunch", "meal type: lunch or breakfast")
 	rootCmd.AddCommand(fetchCmd)
 }
 
 func runFetch(cmd *cobra.Command, _ []string) error {
 	monthStr, _ := cmd.Flags().GetString("month")
 	schoolQuery, _ := cmd.Flags().GetString("school")
+	mealType, _ := cmd.Flags().GetString("meal")
 	cacheDir := viper.GetString("cache_dir")
 
 	school := nutrislice.FindSchool(schoolQuery)
@@ -61,7 +63,7 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 	fmt.Println()
 
 	client := nutrislice.NewClient(cacheDir)
-	weeks, err := client.FetchMonth(*school, year, month)
+	weeks, err := client.FetchMonth(*school, year, month, mealType)
 	if err != nil {
 		return fmt.Errorf("fetching month: %w", err)
 	}

@@ -16,19 +16,66 @@ import (
 
 	"menu/internal/menu"
 	"menu/internal/nutrislice"
+	"menu/internal/store"
 )
 
-type optionStyle struct{ Text, Bg, Border string }
-
-var optionStyles = map[string]optionStyle{
-	"Option 1": {"#1D4ED8", "#EFF6FF", "#BFDBFE"},
-	"Option 2": {"#065F46", "#ECFDF5", "#A7F3D0"},
-	"Option 3": {"#92400E", "#FFFBEB", "#FDE68A"},
-	"Option 4": {"#5B21B6", "#F5F3FF", "#DDD6FE"},
+// optionPalette cycles text/bg colors for Option 1, 2, 3, … wrapping for any count.
+var optionPalette = [][2]string{
+	{"#1D4ED8", "#EFF6FF"},
+	{"#065F46", "#ECFDF5"},
+	{"#92400E", "#FFFBEB"},
+	{"#5B21B6", "#F5F3FF"},
+	{"#0E7490", "#ECFEFF"},
+	{"#B91C1C", "#FEF2F2"},
 }
 
-var modalOrder = []string{
-	"Option 1", "Option 2", "Option 3", "Option 4",
+var sectionSideStyle = map[string][2]string{
+	"Vegetable":  {"#166534", "#F0FDF4"},
+	"Fruit":      {"#9A3412", "#FFF7ED"},
+	"Milk":       {"#1E40AF", "#EFF6FF"},
+	"Condiments": {"#374151", "#F9FAFB"},
+}
+
+var sectionSideEmoji = map[string]string{
+	"Vegetable": "&#x1F966;", "Fruit": "&#x1F34E;",
+	"Milk": "&#x1F95B;", "Condiments": "&#x1F9C2;",
+}
+
+var circledNums = []string{
+	"&#x2460;", "&#x2461;", "&#x2462;", "&#x2463;",
+	"&#x2464;", "&#x2465;", "&#x2466;", "&#x2467;",
+}
+
+// optionColor returns text/bg colors and whether the section is a rotating Option.
+func optionColor(name string) (text, bg string, isOption bool) {
+	if strings.HasPrefix(name, "Option ") {
+		if n, err := strconv.Atoi(strings.TrimPrefix(name, "Option ")); err == nil && n > 0 {
+			c := optionPalette[(n-1)%len(optionPalette)]
+			return c[0], c[1], true
+		}
+	}
+	if s, ok := sectionSideStyle[name]; ok {
+		return s[0], s[1], false
+	}
+	return "#64748B", "#F8FAFC", false
+}
+
+// sectionEmoji returns a display emoji string for a section name.
+func sectionEmoji(name string) string {
+	if em, ok := sectionSideEmoji[name]; ok {
+		return em
+	}
+	if strings.HasPrefix(name, "Option ") {
+		if n, err := strconv.Atoi(strings.TrimPrefix(name, "Option ")); err == nil && n >= 1 && n <= len(circledNums) {
+			return circledNums[n-1]
+		}
+	}
+	return "&#x1F374;"
+}
+
+// modalSectionOrder defines the display order in the day-detail modal.
+var modalSectionOrder = []string{
+	"Option 1", "Option 2", "Option 3", "Option 4", "Option 5", "Option 6",
 	"Vegetable", "Fruit", "Condiments", "Milk",
 }
 
@@ -38,11 +85,12 @@ type Server struct {
 	port      int
 	mux       *http.ServeMux
 	mcpServer *mcp.Server
+	store     *store.Store
 }
 
-// New creates a Server bound to the given port.
-func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server) *Server {
-	s := &Server{client: client, port: port, mux: http.NewServeMux(), mcpServer: mcpSrv}
+// New creates a Server bound to the given port. st may be nil if no persistence is needed.
+func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Store) *Server {
+	s := &Server{client: client, port: port, mux: http.NewServeMux(), mcpServer: mcpSrv, store: st}
 	s.mux.HandleFunc("/", s.handleRoot)
 	s.mux.HandleFunc("/calendar", s.handleCalendar)
 	// REST API v1
@@ -61,6 +109,15 @@ func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	slog.Info("server listening", "addr", "http://localhost"+addr)
 	return http.ListenAndServe(addr, s.mux)
+}
+
+// exclusions returns per-school summary exclusion patterns from the store, or nil if no store.
+func (s *Server) exclusions(schoolSlug string) []string {
+	if s.store == nil {
+		return nil
+	}
+	ex, _ := s.store.GetExclusions(schoolSlug)
+	return ex
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -88,12 +145,17 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
+	mealType := q.Get("meal")
+	if mealType == "" {
+		mealType = "lunch"
+	}
+
 	if view == "week" {
 		d, err := parseQueryDate(q.Get("date"))
 		if err != nil {
 			d = now
 		}
-		week, err := s.client.FetchWeek(*school, d)
+		week, err := s.client.FetchWeek(*school, d, mealType)
 		if err != nil {
 			http.Error(w, "failed to fetch menu: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -103,7 +165,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeWeekPage(w, dayMenus, *school, d)
+		writeWeekPage(w, dayMenus, *school, d, mealType)
 		return
 	}
 
@@ -118,7 +180,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch the month plus adjacent weeks (for roll-over days at month edges)
-	weeks, err := s.client.FetchMonth(*school, year, month)
+	weeks, err := s.client.FetchMonth(*school, year, month, mealType)
 	if err != nil {
 		http.Error(w, "failed to fetch menu: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -135,7 +197,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 			dayMenus[k] = v
 		}
 	}
-	writeCalendarPage(w, dayMenus, *school, year, month)
+	writeCalendarPage(w, dayMenus, *school, year, month, mealType)
 }
 
 func (s *Server) handleAPILunch(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +205,10 @@ func (s *Server) handleAPILunch(w http.ResponseWriter, r *http.Request) {
 	school := nutrislice.FindSchool(q.Get("school"))
 	if school == nil {
 		school = &nutrislice.DefaultSchools[0]
+	}
+	mealType := q.Get("meal")
+	if mealType == "" {
+		mealType = "lunch"
 	}
 
 	var d time.Time
@@ -160,7 +226,7 @@ func (s *Server) handleAPILunch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	week, err := s.client.FetchWeek(*school, d)
+	week, err := s.client.FetchWeek(*school, d, mealType)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -208,12 +274,16 @@ func (s *Server) handleAPILunchWeek(w http.ResponseWriter, r *http.Request) {
 	if school == nil {
 		school = &nutrislice.DefaultSchools[0]
 	}
+	mealType := q.Get("meal")
+	if mealType == "" {
+		mealType = "lunch"
+	}
 	d, err := parseQueryDate(q.Get("date"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	week, err := s.client.FetchWeek(*school, d)
+	week, err := s.client.FetchWeek(*school, d, mealType)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -246,6 +316,10 @@ func (s *Server) handleAPILunchMonth(w http.ResponseWriter, r *http.Request) {
 	if school == nil {
 		school = &nutrislice.DefaultSchools[0]
 	}
+	mealType := q.Get("meal")
+	if mealType == "" {
+		mealType = "lunch"
+	}
 	now := time.Now()
 	year, _ := strconv.Atoi(q.Get("year"))
 	month, _ := strconv.Atoi(q.Get("month"))
@@ -255,7 +329,7 @@ func (s *Server) handleAPILunchMonth(w http.ResponseWriter, r *http.Request) {
 	if month == 0 {
 		month = int(now.Month())
 	}
-	weeks, err := s.client.FetchMonth(*school, year, month)
+	weeks, err := s.client.FetchMonth(*school, year, month, mealType)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -287,6 +361,10 @@ func (s *Server) handleAPISummary(w http.ResponseWriter, r *http.Request) {
 	if school == nil {
 		school = &nutrislice.DefaultSchools[0]
 	}
+	mealType := q.Get("meal")
+	if mealType == "" {
+		mealType = "lunch"
+	}
 
 	dateParam := strings.ToLower(strings.TrimSpace(q.Get("date")))
 	if dateParam == "" {
@@ -298,26 +376,26 @@ func (s *Server) handleAPISummary(w http.ResponseWriter, r *http.Request) {
 		err error
 	)
 	if dateParam == "next" {
-		day, err = s.findNextMenuDay(*school)
+		day, err = s.findNextMenuDay(*school, mealType)
 	} else {
 		d, parseErr := parseQueryDate(dateParam)
 		if parseErr != nil {
 			http.Error(w, parseErr.Error(), http.StatusBadRequest)
 			return
 		}
-		day, err = s.fetchDay(*school, d)
+		day, err = s.fetchDay(*school, d, mealType)
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	writeJSON(w, menu.BuildSummary(day, school.Name))
+	writeJSON(w, menu.BuildSummary(day, school.Name, s.exclusions(school.Slug)))
 }
 
 // findNextMenuDay searches forward from tomorrow for the next school day that
 // has at least one real entrée option (up to 14 calendar days ahead).
-func (s *Server) findNextMenuDay(school nutrislice.School) (menu.DayMenu, error) {
+func (s *Server) findNextMenuDay(school nutrislice.School, mealType string) (menu.DayMenu, error) {
 	now := time.Now()
 	y, m, d := now.Date()
 	start := time.Date(y, m, d+1, 0, 0, 0, 0, now.Location()) // start from tomorrow
@@ -326,7 +404,7 @@ func (s *Server) findNextMenuDay(school nutrislice.School) (menu.DayMenu, error)
 		if wd := candidate.Weekday(); wd == time.Saturday || wd == time.Sunday {
 			continue
 		}
-		day, err := s.fetchDay(school, candidate)
+		day, err := s.fetchDay(school, candidate, mealType)
 		if err != nil {
 			continue
 		}
@@ -338,8 +416,8 @@ func (s *Server) findNextMenuDay(school nutrislice.School) (menu.DayMenu, error)
 }
 
 // fetchDay retrieves and parses a single day's menu.
-func (s *Server) fetchDay(school nutrislice.School, d time.Time) (menu.DayMenu, error) {
-	week, err := s.client.FetchWeek(school, d)
+func (s *Server) fetchDay(school nutrislice.School, d time.Time, mealType string) (menu.DayMenu, error) {
+	week, err := s.client.FetchWeek(school, d, mealType)
 	if err != nil {
 		return menu.DayMenu{}, err
 	}
@@ -416,7 +494,7 @@ type jsonSection struct {
 	Foods []jsonFood `json:"foods"`
 }
 
-func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, year, month int) {
+func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, year, month int, mealType string) {
 	monthName := time.Month(month).String()
 	prevM, prevY := month-1, year
 	if prevM == 0 {
@@ -445,11 +523,38 @@ func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, scho
 	}
 	menuJSON, _ := json.Marshal(jsonDays)
 
-	// Legend
+	// Dynamic CLR/EMOJI maps for JS from actual sections in the data
+	clrMap := make(map[string][2]string)
+	emojiMap := make(map[string]string)
+	for _, day := range days {
+		for _, sec := range day.Sections {
+			if _, ok := clrMap[sec.Name]; ok {
+				continue
+			}
+			text, bg, _ := optionColor(sec.Name)
+			clrMap[sec.Name] = [2]string{text, bg}
+			emojiMap[sec.Name] = sectionEmoji(sec.Name)
+		}
+	}
+	clrJSON, _ := json.Marshal(clrMap)
+	emojiJSON, _ := json.Marshal(emojiMap)
+
+	// Dynamic legend — only option sections that appear in the data
+	seen := make(map[string]bool)
 	var legend strings.Builder
-	for name, style := range optionStyles {
-		fmt.Fprintf(&legend, `<div class="leg-item"><span class="leg-dot" style="background:%s"></span>%s</div>`,
-			style.Text, html.EscapeString(name))
+	for _, day := range days {
+		for _, sec := range day.Sections {
+			if seen[sec.Name] {
+				continue
+			}
+			text, _, isOpt := optionColor(sec.Name)
+			if !isOpt {
+				continue
+			}
+			seen[sec.Name] = true
+			fmt.Fprintf(&legend, `<div class="leg-item"><span class="leg-dot" style="background:%s"></span>%s</div>`,
+				text, html.EscapeString(sec.Name))
+		}
 	}
 
 	// Calendar rows
@@ -464,14 +569,21 @@ func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, scho
 		rows.WriteString(`</div>`)
 	}
 
-	// Sorted section order JSON for JS
-	orderJSON, _ := json.Marshal(modalOrder)
+	// Section order JSON for JS modal
+	orderJSON, _ := json.Marshal(modalSectionOrder)
 
-	weekLink := fmt.Sprintf("/calendar?view=week&date=%s", time.Now().Format("2006-01-02"))
+	// School+meal selector
+	schoolSel := buildSchoolSelector("month", school.Slug, mealType, year, month, "")
+
+	weekLink := fmt.Sprintf("/calendar?view=week&date=%s&school=%s&meal=%s",
+		time.Now().Format("2006-01-02"), school.Slug, mealType)
 	repl := strings.NewReplacer(
-		"[[TITLE]]", html.EscapeString(school.Name)+" Lunch — "+monthName+" "+strconv.Itoa(year),
+		"[[TITLE]]", html.EscapeString(school.Name)+" — "+strings.ToUpper(mealType[:1])+mealType[1:]+" — "+monthName+" "+strconv.Itoa(year),
 		"[[MONTH_YEAR]]", monthName+" "+strconv.Itoa(year),
 		"[[SCHOOL]]", html.EscapeString(school.Name),
+		"[[MEAL_LABEL]]", strings.ToUpper(mealType[:1])+mealType[1:],
+		"[[SCHOOL_SLUG]]", school.Slug,
+		"[[MEAL]]", mealType,
 		"[[PREV_YEAR]]", strconv.Itoa(prevY),
 		"[[PREV_MONTH]]", strconv.Itoa(prevM),
 		"[[PREV_ABBR]]", time.Month(prevM).String()[:3],
@@ -479,12 +591,40 @@ func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, scho
 		"[[NEXT_MONTH]]", strconv.Itoa(nextM),
 		"[[NEXT_ABBR]]", time.Month(nextM).String()[:3],
 		"[[WEEK_LINK]]", weekLink,
+		"[[SCHOOL_SEL]]", schoolSel,
 		"[[LEGEND]]", legend.String(),
 		"[[ROWS]]", rows.String(),
 		"[[MENU_JSON]]", string(menuJSON),
 		"[[ORDER_JSON]]", string(orderJSON),
+		"[[CLR_JSON]]", string(clrJSON),
+		"[[EMOJI_JSON]]", string(emojiJSON),
 	)
 	fmt.Fprint(w, repl.Replace(calendarPage))
+}
+
+// buildSchoolSelector generates the school+meal tab bar HTML.
+// view is "month" or "week"; for month pass year/month; for week pass anchorDate.
+func buildSchoolSelector(view, activeSchool, activeMeal string, year, month int, anchorDate string) string {
+	var sb strings.Builder
+	for _, sch := range nutrislice.DefaultSchools {
+		sb.WriteString(`<div class="sch-grp">`)
+		sb.WriteString(`<span class="sch-name">` + html.EscapeString(sch.Name) + `</span>`)
+		for _, meal := range []string{"breakfast", "lunch"} {
+			active := ""
+			if sch.Slug == activeSchool && meal == activeMeal {
+				active = " active"
+			}
+			var href string
+			if view == "week" {
+				href = fmt.Sprintf("/calendar?view=week&date=%s&school=%s&meal=%s", anchorDate, sch.Slug, meal)
+			} else {
+				href = fmt.Sprintf("/calendar?view=month&year=%d&month=%d&school=%s&meal=%s", year, month, sch.Slug, meal)
+			}
+			sb.WriteString(fmt.Sprintf(`<a class="meal-btn%s" href="%s">%s</a>`, active, href, strings.ToUpper(meal[:1])+meal[1:]))
+		}
+		sb.WriteString(`</div>`)
+	}
+	return sb.String()
 }
 
 // calDay is one cell in the calendar grid.
@@ -558,11 +698,20 @@ func monthDayCell(cd calDay, day menu.DayMenu, hasMenu bool) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `<div class="day-cell%s%s" onclick="openDay('%s')">`, todayCls, otherCls, d.Format("2006-01-02"))
 	fmt.Fprintf(&sb, `<div class="day-num"><span class="dow">%s</span>%d</div>`, d.Format("Mon"), d.Day())
+
+	const maxVisible = 3
+	shown := 0
+	total := 0
 	for _, sec := range day.Sections {
-		style, ok := optionStyles[sec.Name]
-		if !ok || len(sec.Foods) == 0 {
+		text, bg, isOpt := optionColor(sec.Name)
+		if !isOpt || len(sec.Foods) == 0 {
 			continue
 		}
+		total++
+		if shown >= maxVisible {
+			continue
+		}
+		shown++
 		p := sec.Foods[0]
 		name := p.Name
 		if len(name) > 22 {
@@ -576,14 +725,17 @@ func monthDayCell(cd calDay, day menu.DayMenu, hasMenu bool) string {
 		}
 		fmt.Fprintf(&sb,
 			`<div class="opt" style="border-left-color:%s;background:%s"><span class="opt-lbl" style="color:%s">Opt %s</span><span class="opt-name">%s</span>%s</div>`,
-			style.Text, style.Bg, style.Text, label, html.EscapeString(name), img)
+			text, bg, text, label, html.EscapeString(name), img)
+	}
+	if total > maxVisible {
+		fmt.Fprintf(&sb, `<div class="opt-more">+%d more</div>`, total-maxVisible)
 	}
 	sb.WriteString(`</div>`)
 	return sb.String()
 }
 
 // writeWeekPage renders a detailed single-week view.
-func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time) {
+func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time, mealType string) {
 	// Find Mon of this week
 	monday := anchor.AddDate(0, 0, -int(anchor.Weekday()-time.Monday))
 	if anchor.Weekday() == time.Sunday {
@@ -593,8 +745,25 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 	weekLabel := monday.Format("Jan 2") + " – " + monday.AddDate(0, 0, 4).Format("Jan 2, 2006")
 	prevDate := monday.AddDate(0, 0, -7).Format("2006-01-02")
 	nextDate := monday.AddDate(0, 0, 7).Format("2006-01-02")
-	monthLink := fmt.Sprintf("/calendar?view=month&year=%d&month=%d", anchor.Year(), int(anchor.Month()))
-	orderJSON, _ := json.Marshal(modalOrder)
+	monthLink := fmt.Sprintf("/calendar?view=month&year=%d&month=%d&school=%s&meal=%s",
+		anchor.Year(), int(anchor.Month()), school.Slug, mealType)
+	orderJSON, _ := json.Marshal(modalSectionOrder)
+
+	// Dynamic CLR/EMOJI for JS modal
+	clrMap := make(map[string][2]string)
+	emojiMap := make(map[string]string)
+	for _, dm := range days {
+		for _, sec := range dm.Sections {
+			if _, ok := clrMap[sec.Name]; ok {
+				continue
+			}
+			text, bg, _ := optionColor(sec.Name)
+			clrMap[sec.Name] = [2]string{text, bg}
+			emojiMap[sec.Name] = sectionEmoji(sec.Name)
+		}
+	}
+	clrJSON, _ := json.Marshal(clrMap)
+	emojiJSON, _ := json.Marshal(emojiMap)
 
 	var cols strings.Builder
 	for i := 0; i < 5; i++ {
@@ -613,7 +782,7 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 			cols.WriteString(`<div class="wk-no-school">No school</div>`)
 		} else {
 			for _, sec := range dm.Sections {
-				style, isOpt := optionStyles[sec.Name]
+				text, bg, isOpt := optionColor(sec.Name)
 				if len(sec.Foods) == 0 {
 					continue
 				}
@@ -621,9 +790,9 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 					label := strings.TrimPrefix(sec.Name, "Option ")
 					fmt.Fprintf(&cols,
 						`<div class="wk-opt" style="border-top:3px solid %s;background:%s">`,
-						style.Text, style.Bg)
+						text, bg)
 					fmt.Fprintf(&cols,
-						`<div class="wk-opt-lbl" style="color:%s">Option %s</div>`, style.Text, label)
+						`<div class="wk-opt-lbl" style="color:%s">Option %s</div>`, text, label)
 					for _, f := range sec.Foods {
 						img := ""
 						if f.ImageURL != "" {
@@ -642,8 +811,8 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 				} else {
 					// Sides: vegetable, fruit, milk, condiments
 					names := make([]string, len(sec.Foods))
-					for i, f := range sec.Foods {
-						names[i] = html.EscapeString(f.Name)
+					for i2, f := range sec.Foods {
+						names[i2] = html.EscapeString(f.Name)
 					}
 					fmt.Fprintf(&cols,
 						`<div class="wk-side"><span class="wk-side-lbl">%s</span> %s</div>`,
@@ -654,22 +823,30 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 		cols.WriteString(`</div>`)
 	}
 
+	mealLabel := strings.ToUpper(mealType[:1]) + mealType[1:]
+	schoolSel := buildSchoolSelector("week", school.Slug, mealType, 0, 0, anchor.Format("2006-01-02"))
 	repl := strings.NewReplacer(
-		"[[TITLE]]", html.EscapeString(school.Name)+" Lunch — "+weekLabel,
+		"[[TITLE]]", html.EscapeString(school.Name)+" — "+mealLabel+" — "+weekLabel,
 		"[[WEEK_LABEL]]", weekLabel,
 		"[[SCHOOL]]", html.EscapeString(school.Name),
+		"[[MEAL_LABEL]]", mealLabel,
 		"[[PREV_DATE]]", prevDate,
 		"[[NEXT_DATE]]", nextDate,
+		"[[SCHOOL_SLUG]]", school.Slug,
+		"[[MEAL]]", mealType,
 		"[[MONTH_LINK]]", monthLink,
+		"[[SCHOOL_SEL]]", schoolSel,
 		"[[COLS]]", cols.String(),
 		"[[ORDER_JSON]]", string(orderJSON),
+		"[[CLR_JSON]]", string(clrJSON),
+		"[[EMOJI_JSON]]", string(emojiJSON),
 	)
 	fmt.Fprint(w, repl.Replace(weekPage))
 }
 
 func sortedSections(sections []menu.Section) []menu.Section {
-	idx := make(map[string]int, len(modalOrder))
-	for i, name := range modalOrder {
+	idx := make(map[string]int, len(modalSectionOrder))
+	for i, name := range modalSectionOrder {
 		idx[name] = i
 	}
 	sorted := make([]menu.Section, len(sections))
@@ -724,6 +901,13 @@ const calendarPage = `<!DOCTYPE html>
     .day-cell.other-month{background:#F1F5F9}
     .day-cell.past{background:#F8FAFC;cursor:default;opacity:.4}
     .no-data{color:#CBD5E1;font-size:.75rem;text-align:center;margin-top:.75rem}
+    .opt-more{font-size:.65rem;color:#64748B;text-align:center;padding:.1rem 0;margin-top:.1rem}
+    .school-bar{background:#1E293B;padding:.4rem 1.5rem;display:flex;gap:1.5rem;flex-wrap:wrap}
+    .sch-grp{display:flex;align-items:center;gap:.35rem}
+    .sch-name{font-size:.72rem;font-weight:600;color:#94A3B8;white-space:nowrap}
+    .meal-btn{font-size:.72rem;padding:.25rem .65rem;border-radius:20px;text-decoration:none;color:#94A3B8;border:1px solid #334155;transition:background .15s}
+    .meal-btn:hover{background:#334155;color:#CBD5E1}
+    .meal-btn.active{background:#3B82F6;color:#fff;border-color:#3B82F6}
     .day-num{font-size:1rem;font-weight:700;color:#334155;margin-bottom:.45rem;display:flex;align-items:center;gap:.35rem}
     .dow{font-size:.65rem;font-weight:600;text-transform:uppercase;color:#94A3B8;letter-spacing:.04em}
     .today .day-num{color:#1D4ED8}
@@ -759,11 +943,11 @@ const calendarPage = `<!DOCTYPE html>
 <header>
   <div class="hdr-left">
     <h1>[[MONTH_YEAR]]</h1>
-    <p>[[SCHOOL]] &middot; Lunch</p>
+    <p>[[SCHOOL]] &middot; [[MEAL_LABEL]]</p>
   </div>
   <nav class="month-nav">
-    <a class="nav-btn" href="/calendar?view=month&year=[[PREV_YEAR]]&month=[[PREV_MONTH]]">&lsaquo; [[PREV_ABBR]]</a>
-    <a class="nav-btn" href="/calendar?view=month&year=[[NEXT_YEAR]]&month=[[NEXT_MONTH]]">[[NEXT_ABBR]] &rsaquo;</a>
+    <a class="nav-btn" href="/calendar?view=month&year=[[PREV_YEAR]]&month=[[PREV_MONTH]]&school=[[SCHOOL_SLUG]]&meal=[[MEAL]]">&lsaquo; [[PREV_ABBR]]</a>
+    <a class="nav-btn" href="/calendar?view=month&year=[[NEXT_YEAR]]&month=[[NEXT_MONTH]]&school=[[SCHOOL_SLUG]]&meal=[[MEAL]]">[[NEXT_ABBR]] &rsaquo;</a>
     <div class="view-toggle">
       <a class="view-btn active" href="#">Month</a>
       <a class="view-btn" href="[[WEEK_LINK]]">Week</a>
@@ -771,6 +955,7 @@ const calendarPage = `<!DOCTYPE html>
   </nav>
 </header>
 
+<div class="school-bar">[[SCHOOL_SEL]]</div>
 <div class="legend">[[LEGEND]]</div>
 
 <div class="cal-wrap">
@@ -789,7 +974,7 @@ const calendarPage = `<!DOCTYPE html>
     <div class="modal-hdr">
       <div>
         <div class="modal-title" id="modal-title"></div>
-        <div class="modal-sub">[[SCHOOL]] &middot; Lunch</div>
+        <div class="modal-sub">[[SCHOOL]] &middot; [[MEAL_LABEL]]</div>
       </div>
       <button class="close-btn" onclick="closeModal()">&#x2715;</button>
     </div>
@@ -800,20 +985,8 @@ const calendarPage = `<!DOCTYPE html>
 <script>
 var MENU = [[MENU_JSON]];
 var ORDER = [[ORDER_JSON]];
-var CLR = {
-  "Option 1":  ["#1D4ED8","#EFF6FF"],
-  "Option 2":  ["#065F46","#ECFDF5"],
-  "Option 3":  ["#92400E","#FFFBEB"],
-  "Option 4":  ["#5B21B6","#F5F3FF"],
-  "Vegetable": ["#166534","#F0FDF4"],
-  "Fruit":     ["#9A3412","#FFF7ED"],
-  "Milk":      ["#1E40AF","#EFF6FF"],
-  "Condiments":["#374151","#F9FAFB"]
-};
-var EMOJI = {
-  "Option 1":"&#x2460;","Option 2":"&#x2461;","Option 3":"&#x2462;","Option 4":"&#x2463;",
-  "Vegetable":"&#x1F966;","Fruit":"&#x1F34E;","Milk":"&#x1F95B;","Condiments":"&#x1F9C2;"
-};
+var CLR = [[CLR_JSON]];
+var EMOJI = [[EMOJI_JSON]];
 
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
@@ -897,6 +1070,12 @@ const weekPage = `<!DOCTYPE html>
     .view-btn{padding:.4rem .85rem;font-size:.82rem;font-weight:600;text-decoration:none;color:#94A3B8;transition:background .15s}
     .view-btn:hover{background:#334155;color:#fff}
     .view-btn.active{background:#3B82F6;color:#fff}
+    .school-bar{background:#1E293B;padding:.4rem 1.5rem;display:flex;gap:1.5rem;flex-wrap:wrap}
+    .sch-grp{display:flex;align-items:center;gap:.35rem}
+    .sch-name{font-size:.72rem;font-weight:600;color:#94A3B8;white-space:nowrap}
+    .meal-btn{font-size:.72rem;padding:.25rem .65rem;border-radius:20px;text-decoration:none;color:#94A3B8;border:1px solid #334155;transition:background .15s}
+    .meal-btn:hover{background:#334155;color:#CBD5E1}
+    .meal-btn.active{background:#3B82F6;color:#fff;border-color:#3B82F6}
     .wk-wrap{max-width:1440px;margin:1.25rem auto;padding:0 1rem;display:grid;grid-template-columns:repeat(5,1fr);gap:.75rem}
     .wk-col{background:#fff;border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
     .wk-col.wk-today{border:2px solid #3B82F6}
@@ -924,17 +1103,18 @@ const weekPage = `<!DOCTYPE html>
 <header>
   <div class="hdr-left">
     <h1>[[WEEK_LABEL]]</h1>
-    <p>[[SCHOOL]] &middot; Lunch</p>
+    <p>[[SCHOOL]] &middot; [[MEAL_LABEL]]</p>
   </div>
   <div class="hdr-right">
-    <a class="nav-btn" href="/calendar?view=week&date=[[PREV_DATE]]">&lsaquo; Prev week</a>
-    <a class="nav-btn" href="/calendar?view=week&date=[[NEXT_DATE]]">Next week &rsaquo;</a>
+    <a class="nav-btn" href="/calendar?view=week&date=[[PREV_DATE]]&school=[[SCHOOL_SLUG]]&meal=[[MEAL]]">&lsaquo; Prev week</a>
+    <a class="nav-btn" href="/calendar?view=week&date=[[NEXT_DATE]]&school=[[SCHOOL_SLUG]]&meal=[[MEAL]]">Next week &rsaquo;</a>
     <div class="view-toggle">
       <a class="view-btn" href="[[MONTH_LINK]]">Month</a>
       <a class="view-btn active" href="#">Week</a>
     </div>
   </div>
 </header>
+<div class="school-bar">[[SCHOOL_SEL]]</div>
 <div class="wk-wrap">
   [[COLS]]
 </div>

@@ -26,14 +26,18 @@ func NewClient(cacheDir string) *Client {
 }
 
 // FetchWeek returns the week of menu data containing the given date for a school.
-// Results are cached on disk by school + date to avoid redundant requests.
-func (c *Client) FetchWeek(school School, d time.Time) (*WeekResponse, error) {
-	// Cache key: district_slug_YYYY-MM-DD.json (use Monday of the week)
+// mealType is "lunch" or "breakfast"; defaults to "lunch" if empty.
+// Results are cached on disk by school + meal type + date.
+func (c *Client) FetchWeek(school School, d time.Time, mealType string) (*WeekResponse, error) {
+	if mealType == "" {
+		mealType = "lunch"
+	}
+	// Cache key: district_slug_mealtype_YYYY-MM-DD.json (use Monday of the week)
 	monday := d.AddDate(0, 0, -int(d.Weekday()-time.Monday))
 	if d.Weekday() == time.Sunday {
 		monday = d.AddDate(0, 0, 1)
 	}
-	cacheKey := fmt.Sprintf("%s_%s_%s.json", school.District, school.Slug, monday.Format("2006-01-02"))
+	cacheKey := fmt.Sprintf("%s_%s_%s_%s.json", school.District, school.Slug, mealType, monday.Format("2006-01-02"))
 	cachePath := filepath.Join(c.CacheDir, cacheKey)
 
 	if data, err := os.ReadFile(cachePath); err == nil {
@@ -45,8 +49,8 @@ func (c *Client) FetchWeek(school School, d time.Time) (*WeekResponse, error) {
 	}
 
 	url := fmt.Sprintf(
-		"https://%s.api.nutrislice.com/menu/api/weeks/school/%s/menu-type/lunch/%d/%02d/%02d/",
-		school.District, school.Slug, d.Year(), d.Month(), d.Day(),
+		"https://%s.api.nutrislice.com/menu/api/weeks/school/%s/menu-type/%s/%d/%02d/%02d/",
+		school.District, school.Slug, mealType, d.Year(), d.Month(), d.Day(),
 	)
 	slog.Info("fetching menu", "url", url)
 
@@ -87,7 +91,8 @@ func (c *Client) FetchWeek(school School, d time.Time) (*WeekResponse, error) {
 }
 
 // FetchMonth fetches all weeks covering the given month and returns a merged week map.
-func (c *Client) FetchMonth(school School, year, month int) (map[string]*WeekResponse, error) {
+// mealType is "lunch" or "breakfast"; defaults to "lunch" if empty.
+func (c *Client) FetchMonth(school School, year, month int, mealType string) (map[string]*WeekResponse, error) {
 	first := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.Local)
 	last := first.AddDate(0, 1, -1)
 
@@ -100,7 +105,7 @@ func (c *Client) FetchMonth(school School, year, month int) (map[string]*WeekRes
 	result := make(map[string]*WeekResponse)
 	for mon := startMonday; !mon.After(endMonday); mon = mon.AddDate(0, 0, 7) {
 		key := mon.Format("2006-01-02")
-		week, err := c.FetchWeek(school, mon)
+		week, err := c.FetchWeek(school, mon, mealType)
 		if err != nil {
 			slog.Warn("skipping week", "monday", key, "err", err)
 			continue

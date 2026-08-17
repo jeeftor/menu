@@ -17,20 +17,23 @@ import (
 // ── input/output types ────────────────────────────────────────────────────────
 
 type getLunchInput struct {
-	Date   string `json:"date,omitempty"`
-	School string `json:"school,omitempty"`
+	Date     string `json:"date,omitempty"`
+	School   string `json:"school,omitempty"`
+	MealType string `json:"meal_type,omitempty"`
 }
 
 type getLunchSummaryInput struct {
 	// Date accepts: "today", "tomorrow", "next" (next school day with menu),
 	// a weekday name, or YYYY-MM-DD. Defaults to "today".
-	Date   string `json:"date,omitempty"`
-	School string `json:"school,omitempty"`
+	Date     string `json:"date,omitempty"`
+	School   string `json:"school,omitempty"`
+	MealType string `json:"meal_type,omitempty"`
 }
 
 type getLunchWeekInput struct {
-	Date   string `json:"date,omitempty"`
-	School string `json:"school,omitempty"`
+	Date     string `json:"date,omitempty"`
+	School   string `json:"school,omitempty"`
+	MealType string `json:"meal_type,omitempty"`
 }
 
 type foodJSON struct {
@@ -78,15 +81,20 @@ func New(client *nutrislice.Client) *mcp.Server {
 			Name: "get_lunch",
 			Description: `Get the school lunch menu for a specific date.
 date accepts: "today", "tomorrow", "yesterday", a weekday name (e.g. "monday"), or YYYY-MM-DD.
-school accepts a school name or slug (e.g. "woodmen-roberts" or "eagleview"). Defaults to Woodmen Roberts Elementary.`,
+school accepts a school name or slug (e.g. "woodmen-roberts" or "eagleview"). Defaults to Woodmen Roberts Elementary.
+meal_type accepts "lunch" or "breakfast". Defaults to "lunch".`,
 		},
 		func(_ context.Context, _ *mcp.CallToolRequest, in getLunchInput) (*mcp.CallToolResult, dayJSON, error) {
 			school := resolveSchool(in.School)
+			mealType := in.MealType
+			if mealType == "" {
+				mealType = "lunch"
+			}
 			d, err := parseDate(in.Date)
 			if err != nil {
 				return nil, dayJSON{}, fmt.Errorf("invalid date %q: %w", in.Date, err)
 			}
-			week, err := client.FetchWeek(*school, d)
+			week, err := client.FetchWeek(*school, d, mealType)
 			if err != nil {
 				return nil, dayJSON{}, fmt.Errorf("fetching menu: %w", err)
 			}
@@ -112,15 +120,20 @@ school accepts a school name or slug (e.g. "woodmen-roberts" or "eagleview"). De
 			Name: "get_lunch_week",
 			Description: `Get the school lunch menu for an entire week (Mon–Fri).
 date can be any day within the target week; accepts the same formats as get_lunch.
-school accepts a school name or slug. Defaults to Woodmen Roberts Elementary.`,
+school accepts a school name or slug. Defaults to Woodmen Roberts Elementary.
+meal_type accepts "lunch" or "breakfast". Defaults to "lunch".`,
 		},
 		func(_ context.Context, _ *mcp.CallToolRequest, in getLunchWeekInput) (*mcp.CallToolResult, weekJSON, error) {
 			school := resolveSchool(in.School)
+			mealType := in.MealType
+			if mealType == "" {
+				mealType = "lunch"
+			}
 			d, err := parseDate(in.Date)
 			if err != nil {
 				return nil, weekJSON{}, fmt.Errorf("invalid date %q: %w", in.Date, err)
 			}
-			week, err := client.FetchWeek(*school, d)
+			week, err := client.FetchWeek(*school, d, mealType)
 			if err != nil {
 				return nil, weekJSON{}, fmt.Errorf("fetching menu: %w", err)
 			}
@@ -155,6 +168,10 @@ The "text" field is ready-to-speak: e.g. "Buffalo Cheese Pizza Sticks, Cheesebur
 		},
 		func(_ context.Context, _ *mcp.CallToolRequest, in getLunchSummaryInput) (*mcp.CallToolResult, menu.Summary, error) {
 			school := resolveSchool(in.School)
+			mealType := in.MealType
+			if mealType == "" {
+				mealType = "lunch"
+			}
 			dateParam := strings.ToLower(strings.TrimSpace(in.Date))
 			if dateParam == "" {
 				dateParam = "today"
@@ -163,18 +180,18 @@ The "text" field is ready-to-speak: e.g. "Buffalo Cheese Pizza Sticks, Cheesebur
 			var dm menu.DayMenu
 			var err error
 			if dateParam == "next" {
-				dm, err = findNextMenuDay(client, *school)
+				dm, err = findNextMenuDay(client, *school, mealType)
 			} else {
 				d, parseErr := parseDate(dateParam)
 				if parseErr != nil {
 					return nil, menu.Summary{}, parseErr
 				}
-				dm, err = fetchDay(client, *school, d)
+				dm, err = fetchDay(client, *school, d, mealType)
 			}
 			if err != nil {
 				return nil, menu.Summary{}, err
 			}
-			return nil, menu.BuildSummary(dm, school.Name), nil
+			return nil, menu.BuildSummary(dm, school.Name, nil), nil
 		},
 	)
 
@@ -261,8 +278,8 @@ func nextWeekday(from time.Time, wd time.Weekday) time.Time {
 }
 
 // fetchDay retrieves and parses a single day's menu.
-func fetchDay(client *nutrislice.Client, school nutrislice.School, d time.Time) (menu.DayMenu, error) {
-	week, err := client.FetchWeek(school, d)
+func fetchDay(client *nutrislice.Client, school nutrislice.School, d time.Time, mealType string) (menu.DayMenu, error) {
+	week, err := client.FetchWeek(school, d, mealType)
 	if err != nil {
 		return menu.DayMenu{}, err
 	}
@@ -280,7 +297,7 @@ func fetchDay(client *nutrislice.Client, school nutrislice.School, d time.Time) 
 
 // findNextMenuDay searches forward from tomorrow for the next school day with
 // at least one real entrée option (up to 14 calendar days ahead).
-func findNextMenuDay(client *nutrislice.Client, school nutrislice.School) (menu.DayMenu, error) {
+func findNextMenuDay(client *nutrislice.Client, school nutrislice.School, mealType string) (menu.DayMenu, error) {
 	now := time.Now()
 	y, m, d := now.Date()
 	start := time.Date(y, m, d+1, 0, 0, 0, 0, now.Location())
@@ -289,7 +306,7 @@ func findNextMenuDay(client *nutrislice.Client, school nutrislice.School) (menu.
 		if wd := candidate.Weekday(); wd == time.Saturday || wd == time.Sunday {
 			continue
 		}
-		dm, err := fetchDay(client, school, candidate)
+		dm, err := fetchDay(client, school, candidate, mealType)
 		if err != nil {
 			continue
 		}

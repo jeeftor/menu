@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -10,6 +13,7 @@ import (
 	"menu/internal/mcpserver"
 	"menu/internal/nutrislice"
 	"menu/internal/server"
+	"menu/internal/store"
 )
 
 var serveCmd = &cobra.Command{
@@ -21,6 +25,7 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	serveCmd.Flags().Int("port", 8080, "port to listen on")
+	serveCmd.Flags().String("data-dir", "", "directory for SQLite database (default: ~/.config/menu)")
 	if err := viper.BindPFlag("port", serveCmd.Flags().Lookup("port")); err != nil {
 		panic(err)
 	}
@@ -30,12 +35,23 @@ func init() {
 func runServe(cmd *cobra.Command, _ []string) error {
 	port := viper.GetInt("port")
 	cacheDir := viper.GetString("cache_dir")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	if dataDir == "" {
+		home, _ := os.UserHomeDir()
+		dataDir = filepath.Join(home, ".config", "menu")
+	}
 
 	printServeBanner(port)
 
 	client := nutrislice.NewClient(cacheDir)
 	mcpSrv := mcpserver.New(client)
-	srv := server.New(client, port, mcpSrv)
+
+	st, err := store.Open(filepath.Join(dataDir, "menu.db"))
+	if err != nil {
+		slog.Warn("could not open store; favorites/exclusions unavailable", "err", err)
+	}
+
+	srv := server.New(client, port, mcpSrv, st)
 	return srv.Start()
 }
 

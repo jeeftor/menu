@@ -31,6 +31,7 @@ Date formats:
 func init() {
 	showCmd.Flags().String("date", "today", "date to show (today/tomorrow/YYYY-MM-DD/weekday)")
 	showCmd.Flags().String("school", "", "school name or slug (default: Woodmen Roberts)")
+	showCmd.Flags().String("meal", "lunch", "meal type: lunch or breakfast")
 	showCmd.Flags().Bool("week", false, "show the entire week instead of one day")
 	showCmd.Flags().BoolP("json", "j", false, "output as JSON instead of terminal display")
 	rootCmd.AddCommand(showCmd)
@@ -39,6 +40,7 @@ func init() {
 func runShow(cmd *cobra.Command, _ []string) error {
 	dateStr, _ := cmd.Flags().GetString("date")
 	schoolQuery, _ := cmd.Flags().GetString("school")
+	mealType, _ := cmd.Flags().GetString("meal")
 	showWeek, _ := cmd.Flags().GetBool("week")
 	asJSON, _ := cmd.Flags().GetBool("json")
 	cacheDir := viper.GetString("cache_dir")
@@ -60,7 +62,7 @@ func runShow(cmd *cobra.Command, _ []string) error {
 	}
 
 	client := nutrislice.NewClient(cacheDir)
-	week, err := client.FetchWeek(*school, d)
+	week, err := client.FetchWeek(*school, d, mealType)
 	if err != nil {
 		return fmt.Errorf("fetching menu: %w", err)
 	}
