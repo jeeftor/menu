@@ -196,6 +196,7 @@ const settingsPage = `<!DOCTYPE html>
 <body>
 <header>
   <h1>⚙ Settings</h1>
+  <a class="back-btn" href="/api">API</a>
   <a class="back-btn" href="/">← Calendar</a>
 </header>
 

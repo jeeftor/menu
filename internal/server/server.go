@@ -1037,6 +1037,7 @@ const calendarPage = `<!DOCTYPE html>
       <a class="view-btn active" href="#">Month</a>
       <a class="view-btn" href="[[WEEK_LINK]]">Week</a>
     </div>
+    <a class="nav-btn" href="/api" title="API Explorer">API</a>
     <a class="nav-btn" href="/settings" title="Settings">&#x2699;</a>
   </nav>
 </header>
@@ -1200,6 +1201,7 @@ const weekPage = `<!DOCTYPE html>
       <a class="view-btn" href="[[MONTH_LINK]]">Month</a>
       <a class="view-btn active" href="#">Week</a>
     </div>
+    <a class="nav-btn" href="/api" title="API Explorer">API</a>
     <a class="nav-btn" href="/settings" title="Settings">&#x2699;</a>
   </div>
 </header>
