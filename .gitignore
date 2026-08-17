@@ -1,0 +1,6 @@
+bin/
+dist/
+.cache/
+*.yaml.local
+food.yaml
+menu.yaml

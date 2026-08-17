@@ -1,0 +1,942 @@
+// Package server provides the HTTP server and calendar web UI.
+package server
+
+import (
+	"encoding/json"
+	"fmt"
+	"html"
+	"log/slog"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"menu/internal/menu"
+	"menu/internal/nutrislice"
+)
+
+type optionStyle struct{ Text, Bg, Border string }
+
+var optionStyles = map[string]optionStyle{
+	"Option 1": {"#1D4ED8", "#EFF6FF", "#BFDBFE"},
+	"Option 2": {"#065F46", "#ECFDF5", "#A7F3D0"},
+	"Option 3": {"#92400E", "#FFFBEB", "#FDE68A"},
+	"Option 4": {"#5B21B6", "#F5F3FF", "#DDD6FE"},
+}
+
+var modalOrder = []string{
+	"Option 1", "Option 2", "Option 3", "Option 4",
+	"Vegetable", "Fruit", "Condiments", "Milk",
+}
+
+// Server is the school lunch HTTP server.
+type Server struct {
+	client    *nutrislice.Client
+	port      int
+	mux       *http.ServeMux
+	mcpServer *mcp.Server
+}
+
+// New creates a Server bound to the given port.
+func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server) *Server {
+	s := &Server{client: client, port: port, mux: http.NewServeMux(), mcpServer: mcpSrv}
+	s.mux.HandleFunc("/", s.handleRoot)
+	s.mux.HandleFunc("/calendar", s.handleCalendar)
+	// REST API v1
+	s.mux.HandleFunc("/api/v1/schools", s.handleAPISchools)
+	s.mux.HandleFunc("/api/v1/lunch", s.handleAPILunch)
+	s.mux.HandleFunc("/api/v1/lunch/summary", s.handleAPISummary)
+	s.mux.HandleFunc("/api/v1/lunch/week", s.handleAPILunchWeek)
+	s.mux.HandleFunc("/api/v1/lunch/month", s.handleAPILunchMonth)
+	// MCP — Streamable HTTP transport
+	s.mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv }, nil))
+	return s
+}
+
+// Start begins listening on the configured port.
+func (s *Server) Start() error {
+	addr := fmt.Sprintf(":%d", s.port)
+	slog.Info("server listening", "addr", "http://localhost"+addr)
+	return http.ListenAndServe(addr, s.mux)
+}
+
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	now := time.Now()
+	http.Redirect(w, r,
+		fmt.Sprintf("/calendar?view=month&year=%d&month=%d", now.Year(), int(now.Month())),
+		http.StatusFound)
+}
+
+func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	school := nutrislice.FindSchool(q.Get("school"))
+	if school == nil {
+		school = &nutrislice.DefaultSchools[0]
+	}
+	view := q.Get("view")
+	if view == "" {
+		view = "month"
+	}
+
+	now := time.Now()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if view == "week" {
+		d, err := parseQueryDate(q.Get("date"))
+		if err != nil {
+			d = now
+		}
+		week, err := s.client.FetchWeek(*school, d)
+		if err != nil {
+			http.Error(w, "failed to fetch menu: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		dayMenus, err := menu.ParseWeek(*week)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeWeekPage(w, dayMenus, *school, d)
+		return
+	}
+
+	// Month view
+	year, _ := strconv.Atoi(q.Get("year"))
+	month, _ := strconv.Atoi(q.Get("month"))
+	if year == 0 {
+		year = now.Year()
+	}
+	if month == 0 {
+		month = int(now.Month())
+	}
+
+	// Fetch the month plus adjacent weeks (for roll-over days at month edges)
+	weeks, err := s.client.FetchMonth(*school, year, month)
+	if err != nil {
+		http.Error(w, "failed to fetch menu: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// ParseWeek includes all weekdays regardless of month, so roll-over days are free
+	dayMenus := make(map[string]menu.DayMenu)
+	for _, week := range weeks {
+		parsed, err := menu.ParseWeek(*week)
+		if err != nil {
+			slog.Warn("parse error", "err", err)
+			continue
+		}
+		for k, v := range parsed {
+			dayMenus[k] = v
+		}
+	}
+	writeCalendarPage(w, dayMenus, *school, year, month)
+}
+
+func (s *Server) handleAPILunch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	school := nutrislice.FindSchool(q.Get("school"))
+	if school == nil {
+		school = &nutrislice.DefaultSchools[0]
+	}
+
+	var d time.Time
+	var err error
+	switch strings.ToLower(q.Get("date")) {
+	case "", "today":
+		d = time.Now()
+	case "tomorrow":
+		d = time.Now().AddDate(0, 0, 1)
+	default:
+		d, err = time.Parse("2006-01-02", q.Get("date"))
+		if err != nil {
+			http.Error(w, "invalid date; use YYYY-MM-DD, 'today', or 'tomorrow'", http.StatusBadRequest)
+			return
+		}
+	}
+
+	week, err := s.client.FetchWeek(*school, d)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	dayMenus, err := menu.ParseWeek(*week)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	key := d.Format("2006-01-02")
+	day, ok := dayMenus[key]
+
+	w.Header().Set("Content-Type", "application/json")
+	if !ok {
+		json.NewEncoder(w).Encode(map[string]string{
+			"date": key, "school": school.Name,
+			"note": "no menu found — holiday or non-school day",
+		})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{
+		"date": key, "school": school.Name, "sections": day.Sections,
+	})
+}
+
+// ── REST API handlers ────────────────────────────────────────────────────────
+
+func (s *Server) handleAPISchools(w http.ResponseWriter, _ *http.Request) {
+	type schoolJSON struct {
+		Name     string `json:"name"`
+		Slug     string `json:"slug"`
+		District string `json:"district"`
+	}
+	schools := make([]schoolJSON, len(nutrislice.DefaultSchools))
+	for i, sc := range nutrislice.DefaultSchools {
+		schools[i] = schoolJSON{Name: sc.Name, Slug: sc.Slug, District: sc.District}
+	}
+	writeJSON(w, map[string]any{"schools": schools})
+}
+
+func (s *Server) handleAPILunchWeek(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	school := nutrislice.FindSchool(q.Get("school"))
+	if school == nil {
+		school = &nutrislice.DefaultSchools[0]
+	}
+	d, err := parseQueryDate(q.Get("date"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	week, err := s.client.FetchWeek(*school, d)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	dayMenus, err := menu.ParseWeek(*week)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	days := make([]map[string]any, 0, len(dayMenus))
+	for dateStr, dm := range dayMenus {
+		days = append(days, map[string]any{
+			"date":     dateStr,
+			"sections": sectionsJSON(dm.Sections),
+		})
+	}
+	sort.Slice(days, func(i, j int) bool {
+		return days[i]["date"].(string) < days[j]["date"].(string)
+	})
+	writeJSON(w, map[string]any{
+		"school":  school.Name,
+		"week_of": d.Format("2006-01-02"),
+		"days":    days,
+	})
+}
+
+func (s *Server) handleAPILunchMonth(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	school := nutrislice.FindSchool(q.Get("school"))
+	if school == nil {
+		school = &nutrislice.DefaultSchools[0]
+	}
+	now := time.Now()
+	year, _ := strconv.Atoi(q.Get("year"))
+	month, _ := strconv.Atoi(q.Get("month"))
+	if year == 0 {
+		year = now.Year()
+	}
+	if month == 0 {
+		month = int(now.Month())
+	}
+	weeks, err := s.client.FetchMonth(*school, year, month)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	days := make([]map[string]any, 0)
+	for _, week := range weeks {
+		parsed, err := menu.ParseWeek(*week)
+		if err != nil {
+			continue
+		}
+		for dateStr, dm := range parsed {
+			days = append(days, map[string]any{
+				"date":     dateStr,
+				"sections": sectionsJSON(dm.Sections),
+			})
+		}
+	}
+	sort.Slice(days, func(i, j int) bool {
+		return days[i]["date"].(string) < days[j]["date"].(string)
+	})
+	writeJSON(w, map[string]any{
+		"school": school.Name, "year": year, "month": month, "days": days,
+	})
+}
+
+func (s *Server) handleAPISummary(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	school := nutrislice.FindSchool(q.Get("school"))
+	if school == nil {
+		school = &nutrislice.DefaultSchools[0]
+	}
+
+	dateParam := strings.ToLower(strings.TrimSpace(q.Get("date")))
+	if dateParam == "" {
+		dateParam = "today"
+	}
+
+	var (
+		day menu.DayMenu
+		err error
+	)
+	if dateParam == "next" {
+		day, err = s.findNextMenuDay(*school)
+	} else {
+		d, parseErr := parseQueryDate(dateParam)
+		if parseErr != nil {
+			http.Error(w, parseErr.Error(), http.StatusBadRequest)
+			return
+		}
+		day, err = s.fetchDay(*school, d)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, menu.BuildSummary(day, school.Name))
+}
+
+// findNextMenuDay searches forward from tomorrow for the next school day that
+// has at least one real entrée option (up to 14 calendar days ahead).
+func (s *Server) findNextMenuDay(school nutrislice.School) (menu.DayMenu, error) {
+	now := time.Now()
+	y, m, d := now.Date()
+	start := time.Date(y, m, d+1, 0, 0, 0, 0, now.Location()) // start from tomorrow
+	for i := 0; i < 14; i++ {
+		candidate := start.AddDate(0, 0, i)
+		if wd := candidate.Weekday(); wd == time.Saturday || wd == time.Sunday {
+			continue
+		}
+		day, err := s.fetchDay(school, candidate)
+		if err != nil {
+			continue
+		}
+		if len(day.OptionSections()) > 0 {
+			return day, nil
+		}
+	}
+	return menu.DayMenu{}, fmt.Errorf("no upcoming menu found in the next 14 days")
+}
+
+// fetchDay retrieves and parses a single day's menu.
+func (s *Server) fetchDay(school nutrislice.School, d time.Time) (menu.DayMenu, error) {
+	week, err := s.client.FetchWeek(school, d)
+	if err != nil {
+		return menu.DayMenu{}, err
+	}
+	dayMenus, err := menu.ParseWeek(*week)
+	if err != nil {
+		return menu.DayMenu{}, err
+	}
+	key := d.Format("2006-01-02")
+	dm, ok := dayMenus[key]
+	if !ok {
+		return menu.DayMenu{}, fmt.Errorf("no menu for %s", key)
+	}
+	return dm, nil
+}
+
+// sectionsJSON converts menu sections to a JSON-serialisable slice.
+func sectionsJSON(sections []menu.Section) []map[string]any {
+	out := make([]map[string]any, 0, len(sections))
+	for _, sec := range sections {
+		foods := make([]map[string]any, 0, len(sec.Foods))
+		for _, f := range sec.Foods {
+			food := map[string]any{"name": f.Name}
+			if f.ImageURL != "" {
+				food["image_url"] = f.ImageURL
+			}
+			if f.Calories > 0 {
+				food["calories"] = f.Calories
+			}
+			if len(f.Tags) > 0 {
+				food["tags"] = f.Tags
+			}
+			foods = append(foods, food)
+		}
+		out = append(out, map[string]any{"name": sec.Name, "foods": foods})
+	}
+	return out
+}
+
+// parseQueryDate parses date query params: today, tomorrow, or YYYY-MM-DD.
+func parseQueryDate(s string) (time.Time, error) {
+	switch strings.ToLower(s) {
+	case "", "today":
+		return time.Now(), nil
+	case "tomorrow":
+		return time.Now().AddDate(0, 0, 1), nil
+	default:
+		t, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("invalid date %q — use YYYY-MM-DD, 'today', or 'tomorrow'", s)
+		}
+		return t, nil
+	}
+}
+
+// writeJSON writes v as indented JSON with correct headers and CORS.
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	enc.Encode(v) //nolint:errcheck
+}
+
+// ── HTML calendar ────────────────────────────────────────────────────────────
+
+type jsonFood struct {
+	Name     string   `json:"name"`
+	ImageURL string   `json:"image_url,omitempty"`
+	Calories int      `json:"calories,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+}
+type jsonSection struct {
+	Name  string     `json:"name"`
+	Foods []jsonFood `json:"foods"`
+}
+
+func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, year, month int) {
+	monthName := time.Month(month).String()
+	prevM, prevY := month-1, year
+	if prevM == 0 {
+		prevM, prevY = 12, year-1
+	}
+	nextM, nextY := month+1, year
+	if nextM == 13 {
+		nextM, nextY = 1, year+1
+	}
+
+	// JSON for modal
+	jsonDays := make(map[string][]jsonSection)
+	for k, day := range days {
+		secs := make([]jsonSection, 0, len(day.Sections))
+		for _, sec := range day.Sections {
+			js := jsonSection{Name: sec.Name, Foods: make([]jsonFood, 0, len(sec.Foods))}
+			for _, f := range sec.Foods {
+				js.Foods = append(js.Foods, jsonFood{
+					Name: f.Name, ImageURL: f.ImageURL,
+					Calories: f.Calories, Tags: f.Tags,
+				})
+			}
+			secs = append(secs, js)
+		}
+		jsonDays[k] = secs
+	}
+	menuJSON, _ := json.Marshal(jsonDays)
+
+	// Legend
+	var legend strings.Builder
+	for name, style := range optionStyles {
+		fmt.Fprintf(&legend, `<div class="leg-item"><span class="leg-dot" style="background:%s"></span>%s</div>`,
+			style.Text, html.EscapeString(name))
+	}
+
+	// Calendar rows
+	var rows strings.Builder
+	for _, week := range calendarWeeks(year, month) {
+		rows.WriteString(`<div class="week-row">`)
+		for _, cd := range week {
+			key := cd.Date.Format("2006-01-02")
+			dm, hasDayMenu := days[key]
+			rows.WriteString(monthDayCell(cd, dm, hasDayMenu))
+		}
+		rows.WriteString(`</div>`)
+	}
+
+	// Sorted section order JSON for JS
+	orderJSON, _ := json.Marshal(modalOrder)
+
+	weekLink := fmt.Sprintf("/calendar?view=week&date=%s", time.Now().Format("2006-01-02"))
+	repl := strings.NewReplacer(
+		"[[TITLE]]", html.EscapeString(school.Name)+" Lunch — "+monthName+" "+strconv.Itoa(year),
+		"[[MONTH_YEAR]]", monthName+" "+strconv.Itoa(year),
+		"[[SCHOOL]]", html.EscapeString(school.Name),
+		"[[PREV_YEAR]]", strconv.Itoa(prevY),
+		"[[PREV_MONTH]]", strconv.Itoa(prevM),
+		"[[PREV_ABBR]]", time.Month(prevM).String()[:3],
+		"[[NEXT_YEAR]]", strconv.Itoa(nextY),
+		"[[NEXT_MONTH]]", strconv.Itoa(nextM),
+		"[[NEXT_ABBR]]", time.Month(nextM).String()[:3],
+		"[[WEEK_LINK]]", weekLink,
+		"[[LEGEND]]", legend.String(),
+		"[[ROWS]]", rows.String(),
+		"[[MENU_JSON]]", string(menuJSON),
+		"[[ORDER_JSON]]", string(orderJSON),
+	)
+	fmt.Fprint(w, repl.Replace(calendarPage))
+}
+
+// calDay is one cell in the calendar grid.
+type calDay struct {
+	Date    time.Time
+	InMonth bool
+}
+
+// calendarWeeks returns Mon–Fri rows for the month.
+// Days outside the month are included (roll-over) with InMonth=false so the
+// last partial week always shows through Friday.
+func calendarWeeks(year, month int) [][]calDay {
+	first := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.Local)
+	startMonday := first.AddDate(0, 0, -int(first.Weekday()-time.Monday))
+	if first.Weekday() == time.Sunday {
+		startMonday = first.AddDate(0, 0, 1)
+	}
+	last := time.Date(year, time.Month(month+1), 0, 0, 0, 0, 0, time.Local)
+
+	var weeks [][]calDay
+	for d := startMonday; !d.After(last); d = d.AddDate(0, 0, 7) {
+		week := make([]calDay, 5)
+		anyInMonth := false
+		for i := 0; i < 5; i++ {
+			day := d.AddDate(0, 0, i)
+			inMonth := int(day.Month()) == month
+			week[i] = calDay{Date: day, InMonth: inMonth}
+			if inMonth {
+				anyInMonth = true
+			}
+		}
+		if anyInMonth {
+			weeks = append(weeks, week) // always full 5-day row (roll-over included)
+		}
+	}
+	return weeks
+}
+
+// monthDayCell renders one cell in the monthly calendar grid.
+func monthDayCell(cd calDay, day menu.DayMenu, hasMenu bool) string {
+	d := cd.Date
+	now := time.Now()
+	y, m, dd := now.Date()
+	today := time.Date(y, m, dd, 0, 0, 0, 0, now.Location())
+
+	isToday := d.Equal(today)
+	isPast := d.Before(today)
+
+	todayCls := ""
+	if isToday {
+		todayCls = " today"
+	}
+	otherCls := ""
+	if !cd.InMonth {
+		otherCls = " other-month"
+	}
+
+	// Past days: show the cell but hide menu data — no point scrolling through yesterday's lunch.
+	if isPast {
+		return fmt.Sprintf(
+			`<div class="day-cell no-school past%s%s"><div class="day-num"><span class="dow">%s</span>%d</div></div>`,
+			todayCls, otherCls, d.Format("Mon"), d.Day())
+	}
+
+	if !hasMenu {
+		return fmt.Sprintf(
+			`<div class="day-cell no-school%s%s"><div class="day-num"><span class="dow">%s</span>%d</div><div class="no-data">—</div></div>`,
+			todayCls, otherCls, d.Format("Mon"), d.Day())
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `<div class="day-cell%s%s" onclick="openDay('%s')">`, todayCls, otherCls, d.Format("2006-01-02"))
+	fmt.Fprintf(&sb, `<div class="day-num"><span class="dow">%s</span>%d</div>`, d.Format("Mon"), d.Day())
+	for _, sec := range day.Sections {
+		style, ok := optionStyles[sec.Name]
+		if !ok || len(sec.Foods) == 0 {
+			continue
+		}
+		p := sec.Foods[0]
+		name := p.Name
+		if len(name) > 22 {
+			name = name[:20] + "…"
+		}
+		label := strings.TrimPrefix(sec.Name, "Option ")
+		img := ""
+		if p.ImageURL != "" {
+			img = fmt.Sprintf(`<img src="%s" alt="%s" class="opt-img" loading="lazy">`,
+				p.ImageURL, html.EscapeString(p.Name))
+		}
+		fmt.Fprintf(&sb,
+			`<div class="opt" style="border-left-color:%s;background:%s"><span class="opt-lbl" style="color:%s">Opt %s</span><span class="opt-name">%s</span>%s</div>`,
+			style.Text, style.Bg, style.Text, label, html.EscapeString(name), img)
+	}
+	sb.WriteString(`</div>`)
+	return sb.String()
+}
+
+// writeWeekPage renders a detailed single-week view.
+func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time) {
+	// Find Mon of this week
+	monday := anchor.AddDate(0, 0, -int(anchor.Weekday()-time.Monday))
+	if anchor.Weekday() == time.Sunday {
+		monday = anchor.AddDate(0, 0, 1)
+	}
+
+	weekLabel := monday.Format("Jan 2") + " – " + monday.AddDate(0, 0, 4).Format("Jan 2, 2006")
+	prevDate := monday.AddDate(0, 0, -7).Format("2006-01-02")
+	nextDate := monday.AddDate(0, 0, 7).Format("2006-01-02")
+	monthLink := fmt.Sprintf("/calendar?view=month&year=%d&month=%d", anchor.Year(), int(anchor.Month()))
+	orderJSON, _ := json.Marshal(modalOrder)
+
+	var cols strings.Builder
+	for i := 0; i < 5; i++ {
+		d := monday.AddDate(0, 0, i)
+		key := d.Format("2006-01-02")
+		todayCls := ""
+		if key == time.Now().Format("2006-01-02") {
+			todayCls = " wk-today"
+		}
+		fmt.Fprintf(&cols, `<div class="wk-col%s">`, todayCls)
+		fmt.Fprintf(&cols, `<div class="wk-date"><div class="wk-dow">%s</div><div class="wk-day">%d</div><div class="wk-mon">%s</div></div>`,
+			d.Format("Monday"), d.Day(), d.Format("Jan"))
+
+		dm, ok := days[key]
+		if !ok {
+			cols.WriteString(`<div class="wk-no-school">No school</div>`)
+		} else {
+			for _, sec := range dm.Sections {
+				style, isOpt := optionStyles[sec.Name]
+				if len(sec.Foods) == 0 {
+					continue
+				}
+				if isOpt {
+					label := strings.TrimPrefix(sec.Name, "Option ")
+					fmt.Fprintf(&cols,
+						`<div class="wk-opt" style="border-top:3px solid %s;background:%s">`,
+						style.Text, style.Bg)
+					fmt.Fprintf(&cols,
+						`<div class="wk-opt-lbl" style="color:%s">Option %s</div>`, style.Text, label)
+					for _, f := range sec.Foods {
+						img := ""
+						if f.ImageURL != "" {
+							img = fmt.Sprintf(`<img src="%s" alt="%s" class="wk-img" loading="lazy">`,
+								f.ImageURL, html.EscapeString(f.Name))
+						}
+						cal := ""
+						if f.Calories > 0 {
+							cal = fmt.Sprintf(`<span class="wk-cal">%d cal</span>`, f.Calories)
+						}
+						fmt.Fprintf(&cols,
+							`<div class="wk-food">%s<div class="wk-food-info"><div class="wk-food-name">%s</div>%s</div></div>`,
+							img, html.EscapeString(f.Name), cal)
+					}
+					cols.WriteString(`</div>`)
+				} else {
+					// Sides: vegetable, fruit, milk, condiments
+					names := make([]string, len(sec.Foods))
+					for i, f := range sec.Foods {
+						names[i] = html.EscapeString(f.Name)
+					}
+					fmt.Fprintf(&cols,
+						`<div class="wk-side"><span class="wk-side-lbl">%s</span> %s</div>`,
+						html.EscapeString(sec.Name), strings.Join(names, " · "))
+				}
+			}
+		}
+		cols.WriteString(`</div>`)
+	}
+
+	repl := strings.NewReplacer(
+		"[[TITLE]]", html.EscapeString(school.Name)+" Lunch — "+weekLabel,
+		"[[WEEK_LABEL]]", weekLabel,
+		"[[SCHOOL]]", html.EscapeString(school.Name),
+		"[[PREV_DATE]]", prevDate,
+		"[[NEXT_DATE]]", nextDate,
+		"[[MONTH_LINK]]", monthLink,
+		"[[COLS]]", cols.String(),
+		"[[ORDER_JSON]]", string(orderJSON),
+	)
+	fmt.Fprint(w, repl.Replace(weekPage))
+}
+
+func sortedSections(sections []menu.Section) []menu.Section {
+	idx := make(map[string]int, len(modalOrder))
+	for i, name := range modalOrder {
+		idx[name] = i
+	}
+	sorted := make([]menu.Section, len(sections))
+	copy(sorted, sections)
+	sort.Slice(sorted, func(i, j int) bool {
+		oi, okI := idx[sorted[i].Name]
+		oj, okJ := idx[sorted[j].Name]
+		if !okI {
+			oi = 99
+		}
+		if !okJ {
+			oj = 99
+		}
+		return oi < oj
+	})
+	return sorted
+}
+
+// calendarPage is the self-contained HTML template; [[PLACEHOLDERS]] are substituted at runtime.
+const calendarPage = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>[[TITLE]]</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#F1F5F9;color:#1E293B;min-height:100vh}
+    header{background:#0F172A;color:#fff;padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem}
+    .hdr-left h1{font-size:1.4rem;font-weight:700;letter-spacing:-0.02em}
+    .hdr-left p{font-size:.8rem;color:#94A3B8;margin-top:.15rem}
+    .month-nav{display:flex;gap:.5rem;align-items:center}
+    .nav-btn{background:#1E293B;border:1px solid #334155;color:#CBD5E1;padding:.4rem .9rem;border-radius:6px;cursor:pointer;font-size:.85rem;text-decoration:none;transition:background .15s;white-space:nowrap}
+    .nav-btn:hover{background:#334155;color:#fff}
+    .view-toggle{display:flex;background:#1E293B;border:1px solid #334155;border-radius:6px;overflow:hidden;margin-left:.5rem}
+    .view-btn{padding:.4rem .85rem;font-size:.82rem;font-weight:600;text-decoration:none;color:#94A3B8;transition:background .15s;white-space:nowrap}
+    .view-btn:hover{background:#334155;color:#fff}
+    .view-btn.active{background:#3B82F6;color:#fff}
+    .legend{display:flex;gap:1.25rem;flex-wrap:wrap;padding:.6rem 1.5rem;background:#fff;border-bottom:1px solid #E2E8F0}
+    .leg-item{display:flex;align-items:center;gap:.35rem;font-size:.78rem;color:#374151;font-weight:500}
+    .leg-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+    .cal-wrap{max-width:1440px;margin:1.25rem auto;padding:0 1rem}
+    .day-headers{display:grid;grid-template-columns:repeat(5,1fr);gap:.4rem;margin-bottom:.4rem}
+    .day-hdr{text-align:center;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#64748B;padding:.4rem}
+    .week-row{display:grid;grid-template-columns:repeat(5,1fr);gap:.4rem;margin-bottom:.4rem}
+    .day-cell{background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:.55rem .6rem;min-height:170px;cursor:pointer;transition:box-shadow .15s,transform .1s;overflow:hidden}
+    .day-cell:hover{box-shadow:0 6px 24px rgba(0,0,0,.10);transform:translateY(-2px)}
+    .day-cell.today{border:2px solid #3B82F6}
+    .day-cell.no-school{background:#F8FAFC;cursor:default}
+    .day-cell.no-school:hover,.day-cell.day-pad:hover,.day-cell.past:hover{box-shadow:none;transform:none}
+    .day-cell.day-pad{background:transparent;border:1px dashed #CBD5E1;cursor:default;min-height:170px}
+    .day-cell.other-month{background:#F1F5F9}
+    .day-cell.past{background:#F8FAFC;cursor:default;opacity:.4}
+    .no-data{color:#CBD5E1;font-size:.75rem;text-align:center;margin-top:.75rem}
+    .day-num{font-size:1rem;font-weight:700;color:#334155;margin-bottom:.45rem;display:flex;align-items:center;gap:.35rem}
+    .dow{font-size:.65rem;font-weight:600;text-transform:uppercase;color:#94A3B8;letter-spacing:.04em}
+    .today .day-num{color:#1D4ED8}
+    .opt{display:flex;align-items:center;gap:.35rem;padding:.22rem .4rem;border-left:3px solid;border-radius:0 5px 5px 0;margin-bottom:.25rem;font-size:.72rem}
+    .opt-lbl{font-weight:800;font-size:.6rem;white-space:nowrap;flex-shrink:0;min-width:30px}
+    .opt-name{flex:1;color:#1E293B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .opt-img{width:30px;height:30px;object-fit:cover;border-radius:4px;flex-shrink:0}
+    .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;backdrop-filter:blur(3px);align-items:center;justify-content:center}
+    .overlay.open{display:flex;animation:fadeIn .15s ease}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    .modal{background:#fff;border-radius:16px;width:92%;max-width:580px;max-height:88vh;overflow-y:auto;box-shadow:0 30px 70px rgba(0,0,0,.35);animation:slideUp .18s ease}
+    @keyframes slideUp{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
+    .modal-hdr{padding:1.1rem 1.4rem;border-bottom:1px solid #E2E8F0;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;border-radius:16px 16px 0 0;z-index:1}
+    .modal-title{font-size:1.15rem;font-weight:700;color:#0F172A}
+    .modal-sub{font-size:.75rem;color:#64748B;margin-top:.1rem}
+    .close-btn{background:#F1F5F9;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1rem;color:#64748B;display:flex;align-items:center;justify-content:center}
+    .close-btn:hover{background:#E2E8F0}
+    .modal-body{padding:1.1rem 1.4rem}
+    .m-sec{margin-bottom:1.1rem}
+    .m-sec-hdr{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:.3rem .6rem;border-radius:4px;margin-bottom:.5rem;border-left:3px solid}
+    .m-food{display:flex;align-items:center;gap:.75rem;padding:.45rem 0;border-bottom:1px solid #F1F5F9}
+    .m-food:last-child{border-bottom:none}
+    .m-food-img{width:54px;height:54px;object-fit:cover;border-radius:8px;flex-shrink:0}
+    .m-placeholder{width:54px;height:54px;border-radius:8px;background:#F1F5F9;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.5rem}
+    .m-food-info{flex:1;min-width:0}
+    .m-food-name{font-weight:600;font-size:.92rem;color:#1E293B}
+    .m-food-meta{font-size:.75rem;color:#64748B;margin-top:.15rem}
+    .m-tags{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.3rem}
+    .tag{font-size:.65rem;padding:.15rem .45rem;border-radius:20px;background:#F1F5F9;color:#475569;font-weight:600}
+  </style>
+</head>
+<body>
+<header>
+  <div class="hdr-left">
+    <h1>[[MONTH_YEAR]]</h1>
+    <p>[[SCHOOL]] &middot; Lunch</p>
+  </div>
+  <nav class="month-nav">
+    <a class="nav-btn" href="/calendar?view=month&year=[[PREV_YEAR]]&month=[[PREV_MONTH]]">&lsaquo; [[PREV_ABBR]]</a>
+    <a class="nav-btn" href="/calendar?view=month&year=[[NEXT_YEAR]]&month=[[NEXT_MONTH]]">[[NEXT_ABBR]] &rsaquo;</a>
+    <div class="view-toggle">
+      <a class="view-btn active" href="#">Month</a>
+      <a class="view-btn" href="[[WEEK_LINK]]">Week</a>
+    </div>
+  </nav>
+</header>
+
+<div class="legend">[[LEGEND]]</div>
+
+<div class="cal-wrap">
+  <div class="day-headers">
+    <div class="day-hdr">Monday</div>
+    <div class="day-hdr">Tuesday</div>
+    <div class="day-hdr">Wednesday</div>
+    <div class="day-hdr">Thursday</div>
+    <div class="day-hdr">Friday</div>
+  </div>
+  [[ROWS]]
+</div>
+
+<div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div>
+        <div class="modal-title" id="modal-title"></div>
+        <div class="modal-sub">[[SCHOOL]] &middot; Lunch</div>
+      </div>
+      <button class="close-btn" onclick="closeModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+var MENU = [[MENU_JSON]];
+var ORDER = [[ORDER_JSON]];
+var CLR = {
+  "Option 1":  ["#1D4ED8","#EFF6FF"],
+  "Option 2":  ["#065F46","#ECFDF5"],
+  "Option 3":  ["#92400E","#FFFBEB"],
+  "Option 4":  ["#5B21B6","#F5F3FF"],
+  "Vegetable": ["#166534","#F0FDF4"],
+  "Fruit":     ["#9A3412","#FFF7ED"],
+  "Milk":      ["#1E40AF","#EFF6FF"],
+  "Condiments":["#374151","#F9FAFB"]
+};
+var EMOJI = {
+  "Option 1":"&#x2460;","Option 2":"&#x2461;","Option 3":"&#x2462;","Option 4":"&#x2463;",
+  "Vegetable":"&#x1F966;","Fruit":"&#x1F34E;","Milk":"&#x1F95B;","Condiments":"&#x1F9C2;"
+};
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function openDay(dateStr) {
+  var secs = MENU[dateStr];
+  if (!secs || !secs.length) return;
+  var d = new Date(dateStr + 'T12:00:00');
+  document.getElementById('modal-title').textContent =
+    d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric', year:'numeric'});
+
+  var sorted = secs.slice().sort(function(a,b){
+    var ai = ORDER.indexOf(a.name), bi = ORDER.indexOf(b.name);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
+
+  var html = '';
+  for (var i = 0; i < sorted.length; i++) {
+    var sec = sorted[i];
+    if (!sec.foods || !sec.foods.length) continue;
+    var clr = CLR[sec.name] || ['#64748B','#F8FAFC'];
+    var tc = clr[0], bg = clr[1];
+    var em = EMOJI[sec.name] || '&#x1F374;';
+
+    html += '<div class="m-sec">';
+    html += '<div class="m-sec-hdr" style="color:' + tc + ';background:' + bg + ';border-left-color:' + tc + '">' + em + ' ' + esc(sec.name) + '</div>';
+
+    for (var j = 0; j < sec.foods.length; j++) {
+      var f = sec.foods[j];
+      var img = f.image_url
+        ? '<img src="' + esc(f.image_url) + '" alt="' + esc(f.name) + '" class="m-food-img" loading="lazy">'
+        : '<div class="m-placeholder">' + em + '</div>';
+      var cal = f.calories ? '<span>' + f.calories + ' cal</span>' : '';
+      var tags = '';
+      if (f.tags && f.tags.length) {
+        for (var k = 0; k < f.tags.length; k++) {
+          tags += '<span class="tag">' + esc(f.tags[k]) + '</span>';
+        }
+      }
+      html += '<div class="m-food">' + img;
+      html += '<div class="m-food-info">';
+      html += '<div class="m-food-name">' + esc(f.name) + '</div>';
+      html += '<div class="m-food-meta">' + cal + '</div>';
+      if (tags) html += '<div class="m-tags">' + tags + '</div>';
+      html += '</div></div>';
+    }
+    html += '</div>';
+  }
+
+  document.getElementById('modal-body').innerHTML = html;
+  document.getElementById('overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+  document.getElementById('overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
+</script>
+</body>
+</html>`
+
+// weekPage is the self-contained HTML template for the single-week view.
+const weekPage = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>[[TITLE]]</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#F1F5F9;color:#1E293B;min-height:100vh}
+    header{background:#0F172A;color:#fff;padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+    .hdr-left h1{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em}
+    .hdr-left p{font-size:.8rem;color:#94A3B8;margin-top:.15rem}
+    .hdr-right{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    .nav-btn{background:#1E293B;border:1px solid #334155;color:#CBD5E1;padding:.4rem .9rem;border-radius:6px;font-size:.85rem;text-decoration:none;transition:background .15s;white-space:nowrap}
+    .nav-btn:hover{background:#334155;color:#fff}
+    .view-toggle{display:flex;background:#1E293B;border:1px solid #334155;border-radius:6px;overflow:hidden}
+    .view-btn{padding:.4rem .85rem;font-size:.82rem;font-weight:600;text-decoration:none;color:#94A3B8;transition:background .15s}
+    .view-btn:hover{background:#334155;color:#fff}
+    .view-btn.active{background:#3B82F6;color:#fff}
+    .wk-wrap{max-width:1440px;margin:1.25rem auto;padding:0 1rem;display:grid;grid-template-columns:repeat(5,1fr);gap:.75rem}
+    .wk-col{background:#fff;border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+    .wk-col.wk-today{border:2px solid #3B82F6}
+    .wk-date{padding:.75rem 1rem;background:#F8FAFC;border-bottom:1px solid #E2E8F0;text-align:center}
+    .wk-today .wk-date{background:#EFF6FF}
+    .wk-dow{font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#64748B}
+    .wk-day{font-size:2rem;font-weight:800;color:#0F172A;line-height:1}
+    .wk-today .wk-day{color:#1D4ED8}
+    .wk-mon{font-size:.75rem;color:#94A3B8;font-weight:500;margin-top:.1rem}
+    .wk-opt{margin:.6rem .6rem 0;border-radius:8px;overflow:hidden}
+    .wk-opt-lbl{font-size:.65rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:.3rem .6rem}
+    .wk-food{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;background:rgba(255,255,255,.7)}
+    .wk-food:not(:last-child){border-bottom:1px solid rgba(0,0,0,.05)}
+    .wk-img{width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0}
+    .wk-food-info{flex:1;min-width:0}
+    .wk-food-name{font-size:.82rem;font-weight:600;color:#1E293B;line-height:1.25}
+    .wk-cal{font-size:.68rem;color:#94A3B8;margin-top:.1rem;display:block}
+    .wk-side{margin:.35rem .6rem 0;font-size:.72rem;color:#64748B;padding:.2rem 0;border-top:1px solid #F1F5F9}
+    .wk-side-lbl{font-weight:700;color:#475569}
+    .wk-no-school{flex:1;display:flex;align-items:center;justify-content:center;color:#CBD5E1;font-size:.82rem;padding:2rem}
+    .wk-col > *:last-child{margin-bottom:.6rem}
+  </style>
+</head>
+<body>
+<header>
+  <div class="hdr-left">
+    <h1>[[WEEK_LABEL]]</h1>
+    <p>[[SCHOOL]] &middot; Lunch</p>
+  </div>
+  <div class="hdr-right">
+    <a class="nav-btn" href="/calendar?view=week&date=[[PREV_DATE]]">&lsaquo; Prev week</a>
+    <a class="nav-btn" href="/calendar?view=week&date=[[NEXT_DATE]]">Next week &rsaquo;</a>
+    <div class="view-toggle">
+      <a class="view-btn" href="[[MONTH_LINK]]">Month</a>
+      <a class="view-btn active" href="#">Week</a>
+    </div>
+  </div>
+</header>
+<div class="wk-wrap">
+  [[COLS]]
+</div>
+</body>
+</html>`
