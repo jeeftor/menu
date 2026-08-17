@@ -187,3 +187,31 @@ func (s *Server) handleAPIExclusions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
+
+// ── /api/v1/missing-images ────────────────────────────────────────────────────
+
+// handleAPIMissingImages scans cached menu JSON files and returns food names
+// that have no API-provided image and no custom store override.
+func (s *Server) handleAPIMissingImages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	customCovered := make(map[string]bool)
+	if s.store != nil {
+		if imgs, err := s.store.ListFoodImages(); err == nil {
+			for _, img := range imgs {
+				customCovered[strings.ToLower(strings.TrimSpace(img.FoodName))] = true
+			}
+		}
+	}
+	missing, err := s.client.ScanMissingImages(customCovered)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if missing == nil {
+		missing = []string{}
+	}
+	writeJSON(w, missing)
+}

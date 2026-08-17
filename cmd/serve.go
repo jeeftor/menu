@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -26,7 +27,11 @@ var serveCmd = &cobra.Command{
 func init() {
 	serveCmd.Flags().Int("port", 8080, "port to listen on")
 	serveCmd.Flags().String("data-dir", "", "directory for SQLite database (default: ~/.config/menu)")
+	serveCmd.Flags().String("external-url", "", "public base URL shown in the startup banner (e.g. http://homelab:8080)")
 	if err := viper.BindPFlag("port", serveCmd.Flags().Lookup("port")); err != nil {
+		panic(err)
+	}
+	if err := viper.BindPFlag("external_url", serveCmd.Flags().Lookup("external-url")); err != nil {
 		panic(err)
 	}
 	rootCmd.AddCommand(serveCmd)
@@ -35,13 +40,14 @@ func init() {
 func runServe(cmd *cobra.Command, _ []string) error {
 	port := viper.GetInt("port")
 	cacheDir := viper.GetString("cache_dir")
+	externalURL := viper.GetString("external_url")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	if dataDir == "" {
 		home, _ := os.UserHomeDir()
 		dataDir = filepath.Join(home, ".config", "menu")
 	}
 
-	printServeBanner(port)
+	printServeBanner(port, externalURL)
 
 	client := nutrislice.NewClient(cacheDir)
 	mcpSrv := mcpserver.New(client)
@@ -55,7 +61,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	return srv.Start()
 }
 
-func printServeBanner(port int) {
+func printServeBanner(port int, externalURL string) {
+	base := fmt.Sprintf("http://localhost:%d", port)
+	if externalURL != "" {
+		base = strings.TrimRight(externalURL, "/")
+	}
+
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F59E0B"))
 	urlStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#60A5FA")).Underline(true)
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8"))
@@ -69,10 +80,10 @@ func printServeBanner(port int) {
 			lipgloss.JoinVertical(lipgloss.Left,
 				titleStyle.Render("🍽️  Menu — School Lunch Calendar")+" "+verStyle.Render("v"+Version),
 				"",
-				dimStyle.Render("Calendar  ")+urlStyle.Render(fmt.Sprintf("http://localhost:%d/", port)),
-				dimStyle.Render("REST API  ")+urlStyle.Render(fmt.Sprintf("http://localhost:%d/api/v1/lunch?date=today", port)),
-				dimStyle.Render("Settings  ")+urlStyle.Render(fmt.Sprintf("http://localhost:%d/settings", port)),
-				dimStyle.Render("MCP HTTP  ")+urlStyle.Render(fmt.Sprintf("http://localhost:%d/mcp", port)),
+				dimStyle.Render("Calendar  ")+urlStyle.Render(base+"/"),
+				dimStyle.Render("API Docs  ")+urlStyle.Render(base+"/api"),
+				dimStyle.Render("Settings  ")+urlStyle.Render(base+"/settings"),
+				dimStyle.Render("MCP HTTP  ")+urlStyle.Render(base+"/mcp"),
 				dimStyle.Render("MCP stdio ")+urlStyle.Render("menu mcp"),
 				"",
 				dimStyle.Render("Press Ctrl+C to stop"),

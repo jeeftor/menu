@@ -61,7 +61,9 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
-        run: go build -ldflags "-s -w" -o menu ./main.go
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          go build -ldflags "-s -w -X menu/cmd.Version=${version}" -o menu ./main.go
 
       - uses: docker/setup-buildx-action@v4
 
