@@ -51,7 +51,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		slog.Warn("could not open store; favorites/exclusions unavailable", "err", err)
 	}
 
-	srv := server.New(client, port, mcpSrv, st)
+	srv := server.New(client, port, mcpSrv, st, Version)
 	return srv.Start()
 }
 
@@ -59,6 +59,7 @@ func printServeBanner(port int) {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F59E0B"))
 	urlStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#60A5FA")).Underline(true)
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8"))
+	verStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
 
 	banner := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -66,10 +67,11 @@ func printServeBanner(port int) {
 		Padding(0, 2).
 		Render(
 			lipgloss.JoinVertical(lipgloss.Left,
-				titleStyle.Render("🍽️  Food — School Lunch Calendar"),
+				titleStyle.Render("🍽️  Menu — School Lunch Calendar")+" "+verStyle.Render("v"+Version),
 				"",
 				dimStyle.Render("Calendar  ")+urlStyle.Render(fmt.Sprintf("http://localhost:%d/", port)),
 				dimStyle.Render("REST API  ")+urlStyle.Render(fmt.Sprintf("http://localhost:%d/api/v1/lunch?date=today", port)),
+				dimStyle.Render("Settings  ")+urlStyle.Render(fmt.Sprintf("http://localhost:%d/settings", port)),
 				dimStyle.Render("MCP HTTP  ")+urlStyle.Render(fmt.Sprintf("http://localhost:%d/mcp", port)),
 				dimStyle.Render("MCP stdio ")+urlStyle.Render("menu mcp"),
 				"",

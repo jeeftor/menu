@@ -83,14 +83,15 @@ var modalSectionOrder = []string{
 type Server struct {
 	client    *nutrislice.Client
 	port      int
+	version   string
 	mux       *http.ServeMux
 	mcpServer *mcp.Server
 	store     *store.Store
 }
 
 // New creates a Server bound to the given port. st may be nil if no persistence is needed.
-func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Store) *Server {
-	s := &Server{client: client, port: port, mux: http.NewServeMux(), mcpServer: mcpSrv, store: st}
+func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Store, version string) *Server {
+	s := &Server{client: client, port: port, version: version, mux: http.NewServeMux(), mcpServer: mcpSrv, store: st}
 	s.mux.HandleFunc("/", s.handleRoot)
 	s.mux.HandleFunc("/calendar", s.handleCalendar)
 	// REST API v1
@@ -194,7 +195,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dayMenus = s.resolveMenuImages(dayMenus)
-		writeWeekPage(w, dayMenus, *school, d, mealType)
+		writeWeekPage(w, dayMenus, *school, d, mealType, s.version)
 		return
 	}
 
@@ -227,7 +228,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dayMenus = s.resolveMenuImages(dayMenus)
-	writeCalendarPage(w, dayMenus, *school, year, month, mealType)
+	writeCalendarPage(w, dayMenus, *school, year, month, mealType, s.version)
 }
 
 func (s *Server) handleAPILunch(w http.ResponseWriter, r *http.Request) {
@@ -524,7 +525,7 @@ type jsonSection struct {
 	Foods []jsonFood `json:"foods"`
 }
 
-func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, year, month int, mealType string) {
+func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, year, month int, mealType, version string) {
 	monthName := time.Month(month).String()
 	prevM, prevY := month-1, year
 	if prevM == 0 {
@@ -628,6 +629,7 @@ func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, scho
 		"[[ORDER_JSON]]", string(orderJSON),
 		"[[CLR_JSON]]", string(clrJSON),
 		"[[EMOJI_JSON]]", string(emojiJSON),
+		"[[VERSION]]", version,
 	)
 	fmt.Fprint(w, repl.Replace(calendarPage))
 }
@@ -765,7 +767,7 @@ func monthDayCell(cd calDay, day menu.DayMenu, hasMenu bool) string {
 }
 
 // writeWeekPage renders a detailed single-week view.
-func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time, mealType string) {
+func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time, mealType, version string) {
 	// Find Mon of this week
 	monday := anchor.AddDate(0, 0, -int(anchor.Weekday()-time.Monday))
 	if anchor.Weekday() == time.Sunday {
@@ -870,6 +872,7 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 		"[[ORDER_JSON]]", string(orderJSON),
 		"[[CLR_JSON]]", string(clrJSON),
 		"[[EMOJI_JSON]]", string(emojiJSON),
+		"[[VERSION]]", version,
 	)
 	fmt.Fprint(w, repl.Replace(weekPage))
 }
@@ -908,6 +911,7 @@ const calendarPage = `<!DOCTYPE html>
     header{background:#0F172A;color:#fff;padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem}
     .hdr-left h1{font-size:1.4rem;font-weight:700;letter-spacing:-0.02em}
     .hdr-left p{font-size:.8rem;color:#94A3B8;margin-top:.15rem}
+    .ver-badge{font-size:.65rem;color:#475569;background:#1E293B;border:1px solid #334155;padding:.1rem .45rem;border-radius:20px;vertical-align:middle;margin-left:.4rem;font-weight:500}
     .month-nav{display:flex;gap:.5rem;align-items:center}
     .nav-btn{background:#1E293B;border:1px solid #334155;color:#CBD5E1;padding:.4rem .9rem;border-radius:6px;cursor:pointer;font-size:.85rem;text-decoration:none;transition:background .15s;white-space:nowrap}
     .nav-btn:hover{background:#334155;color:#fff}
@@ -972,7 +976,7 @@ const calendarPage = `<!DOCTYPE html>
 <body>
 <header>
   <div class="hdr-left">
-    <h1>[[MONTH_YEAR]]</h1>
+    <h1>[[MONTH_YEAR]]<span class="ver-badge">v[[VERSION]]</span></h1>
     <p>[[SCHOOL]] &middot; [[MEAL_LABEL]]</p>
   </div>
   <nav class="month-nav">
@@ -1094,6 +1098,7 @@ const weekPage = `<!DOCTYPE html>
     header{background:#0F172A;color:#fff;padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
     .hdr-left h1{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em}
     .hdr-left p{font-size:.8rem;color:#94A3B8;margin-top:.15rem}
+    .ver-badge{font-size:.65rem;color:#475569;background:#1E293B;border:1px solid #334155;padding:.1rem .45rem;border-radius:20px;vertical-align:middle;margin-left:.4rem;font-weight:500}
     .hdr-right{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
     .nav-btn{background:#1E293B;border:1px solid #334155;color:#CBD5E1;padding:.4rem .9rem;border-radius:6px;font-size:.85rem;text-decoration:none;transition:background .15s;white-space:nowrap}
     .nav-btn:hover{background:#334155;color:#fff}
@@ -1133,7 +1138,7 @@ const weekPage = `<!DOCTYPE html>
 <body>
 <header>
   <div class="hdr-left">
-    <h1>[[WEEK_LABEL]]</h1>
+    <h1>[[WEEK_LABEL]]<span class="ver-badge">v[[VERSION]]</span></h1>
     <p>[[SCHOOL]] &middot; [[MEAL_LABEL]]</p>
   </div>
   <div class="hdr-right">
