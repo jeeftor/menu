@@ -94,11 +94,15 @@ func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Stor
 	s.mux.HandleFunc("/", s.handleRoot)
 	s.mux.HandleFunc("/calendar", s.handleCalendar)
 	// REST API v1
+	s.mux.HandleFunc("/settings", s.handleSettings)
 	s.mux.HandleFunc("/api/v1/schools", s.handleAPISchools)
 	s.mux.HandleFunc("/api/v1/lunch", s.handleAPILunch)
 	s.mux.HandleFunc("/api/v1/lunch/summary", s.handleAPISummary)
 	s.mux.HandleFunc("/api/v1/lunch/week", s.handleAPILunchWeek)
 	s.mux.HandleFunc("/api/v1/lunch/month", s.handleAPILunchMonth)
+	s.mux.HandleFunc("/api/v1/food-images", s.handleAPIFoodImages)
+	s.mux.HandleFunc("/api/v1/favorites", s.handleAPIFavorites)
+	s.mux.HandleFunc("/api/v1/exclusions", s.handleAPIExclusions)
 	// MCP — Streamable HTTP transport
 	s.mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv }, nil))
 	return s
@@ -118,6 +122,30 @@ func (s *Server) exclusions(schoolSlug string) []string {
 	}
 	ex, _ := s.store.GetExclusions(schoolSlug)
 	return ex
+}
+
+// resolveMenuImages overlays custom images from the store onto API-provided menus.
+// Items that already have an API image keep it; missing images are filled from the store.
+func (s *Server) resolveMenuImages(days map[string]menu.DayMenu) map[string]menu.DayMenu {
+	if s.store == nil {
+		return days
+	}
+	resolved := make(map[string]menu.DayMenu, len(days))
+	for k, day := range days {
+		secs := make([]menu.Section, len(day.Sections))
+		for i, sec := range day.Sections {
+			foods := make([]menu.Item, len(sec.Foods))
+			for j, f := range sec.Foods {
+				f.ImageURL = s.store.ResolveImage(f.Name, f.ImageURL)
+				foods[j] = f
+			}
+			sec.Foods = foods
+			secs[i] = sec
+		}
+		day.Sections = secs
+		resolved[k] = day
+	}
+	return resolved
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +193,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		dayMenus = s.resolveMenuImages(dayMenus)
 		writeWeekPage(w, dayMenus, *school, d, mealType)
 		return
 	}
@@ -197,6 +226,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 			dayMenus[k] = v
 		}
 	}
+	dayMenus = s.resolveMenuImages(dayMenus)
 	writeCalendarPage(w, dayMenus, *school, year, month, mealType)
 }
 
@@ -952,6 +982,7 @@ const calendarPage = `<!DOCTYPE html>
       <a class="view-btn active" href="#">Month</a>
       <a class="view-btn" href="[[WEEK_LINK]]">Week</a>
     </div>
+    <a class="nav-btn" href="/settings" title="Settings">&#x2699;</a>
   </nav>
 </header>
 
@@ -1112,6 +1143,7 @@ const weekPage = `<!DOCTYPE html>
       <a class="view-btn" href="[[MONTH_LINK]]">Month</a>
       <a class="view-btn active" href="#">Week</a>
     </div>
+    <a class="nav-btn" href="/settings" title="Settings">&#x2699;</a>
   </div>
 </header>
 <div class="school-bar">[[SCHOOL_SEL]]</div>
