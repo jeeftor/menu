@@ -1005,18 +1005,25 @@ const calendarPage = `<!DOCTYPE html>
     @keyframes fadeIn{from{opacity:0}to{opacity:1}}
     .modal{background:#fff;border-radius:16px;width:92%;max-width:580px;max-height:88vh;overflow-y:auto;box-shadow:0 30px 70px rgba(0,0,0,.35);animation:slideUp .18s ease}
     @keyframes slideUp{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
-    .modal-hdr{padding:1.1rem 1.4rem;border-bottom:1px solid #E2E8F0;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;border-radius:16px 16px 0 0;z-index:1}
-    .modal-title{font-size:1.15rem;font-weight:700;color:#0F172A}
-    .modal-sub{font-size:.75rem;color:#64748B;margin-top:.1rem}
-    .close-btn{background:#F1F5F9;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1rem;color:#64748B;display:flex;align-items:center;justify-content:center}
+    .modal-hdr{padding:.9rem 1.1rem;border-bottom:1px solid #E2E8F0;display:flex;align-items:center;gap:.45rem;position:sticky;top:0;background:#fff;border-radius:16px 16px 0 0;z-index:1}
+    .modal-title{font-size:1.1rem;font-weight:700;color:#0F172A}
+    .modal-sub{font-size:.73rem;color:#64748B;margin-top:.1rem}
+    .modal-hdr-mid{flex:1;min-width:0;text-align:center}
+    .close-btn{background:#F1F5F9;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1rem;color:#64748B;display:flex;align-items:center;justify-content:center;flex-shrink:0}
     .close-btn:hover{background:#E2E8F0}
+    .modal-nav{background:none;border:1px solid #E2E8F0;color:#94A3B8;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:1.25rem;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;transition:all .15s}
+    .modal-nav:hover:not([disabled]){background:#F1F5F9;color:#0F172A;border-color:#CBD5E1}
+    .modal-nav[disabled]{opacity:.2;cursor:default}
     .modal-body{padding:1.1rem 1.4rem}
     .m-sec{margin-bottom:1.1rem}
     .m-sec-hdr{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:.3rem .6rem;border-radius:4px;margin-bottom:.5rem;border-left:3px solid}
     .m-food{display:flex;align-items:center;gap:.75rem;padding:.45rem 0;border-bottom:1px solid #F1F5F9}
     .m-food:last-child{border-bottom:none}
     .m-food-img{width:54px;height:54px;object-fit:cover;border-radius:8px;flex-shrink:0}
-    .m-placeholder{width:54px;height:54px;border-radius:8px;background:#F1F5F9;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.5rem}
+    .m-placeholder{width:54px;height:54px;border-radius:8px;background:#F8FAFC;border:1.5px dashed #E2E8F0;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:1.3rem;text-decoration:none;gap:1px;transition:all .15s;color:inherit}
+    .m-placeholder:hover{background:#EFF6FF;border-color:#93C5FD}
+    .m-add-lbl{font-size:.48rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#CBD5E1}
+    .m-placeholder:hover .m-add-lbl{color:#3B82F6}
     .m-food-info{flex:1;min-width:0}
     .m-food-name{font-weight:600;font-size:.92rem;color:#1E293B}
     .m-food-meta{font-size:.75rem;color:#64748B;margin-top:.15rem}
@@ -1059,10 +1066,12 @@ const calendarPage = `<!DOCTYPE html>
 <div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
   <div class="modal">
     <div class="modal-hdr">
-      <div>
+      <button class="modal-nav" id="modal-prev" onclick="modalNav(-1)">&#x2039;</button>
+      <div class="modal-hdr-mid">
         <div class="modal-title" id="modal-title"></div>
         <div class="modal-sub">[[SCHOOL]] &middot; [[MEAL_LABEL]]</div>
       </div>
+      <button class="modal-nav" id="modal-next" onclick="modalNav(1)">&#x203A;</button>
       <button class="close-btn" onclick="closeModal()">&#x2715;</button>
     </div>
     <div class="modal-body" id="modal-body"></div>
@@ -1074,12 +1083,29 @@ var MENU = [[MENU_JSON]];
 var ORDER = [[ORDER_JSON]];
 var CLR = [[CLR_JSON]];
 var EMOJI = [[EMOJI_JSON]];
+var DATES = Object.keys(MENU).sort();
+var CUR_DATE = null;
 
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function updateModalNav() {
+  var idx = DATES.indexOf(CUR_DATE);
+  var prev = document.getElementById('modal-prev');
+  var next = document.getElementById('modal-next');
+  if (idx <= 0) { prev.setAttribute('disabled',''); } else { prev.removeAttribute('disabled'); }
+  if (idx >= DATES.length - 1) { next.setAttribute('disabled',''); } else { next.removeAttribute('disabled'); }
+}
+function modalNav(dir) {
+  var idx = DATES.indexOf(CUR_DATE);
+  var n = idx + dir;
+  if (n >= 0 && n < DATES.length) openDay(DATES[n]);
+}
 
 function openDay(dateStr) {
   var secs = MENU[dateStr];
   if (!secs || !secs.length) return;
+  CUR_DATE = dateStr;
+  updateModalNav();
   var d = new Date(dateStr + 'T12:00:00');
   document.getElementById('modal-title').textContent =
     d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric', year:'numeric'});
@@ -1104,7 +1130,7 @@ function openDay(dateStr) {
       var f = sec.foods[j];
       var img = f.image_url
         ? '<img src="' + esc(f.image_url) + '" alt="' + esc(f.name) + '" class="m-food-img" loading="lazy">'
-        : '<div class="m-placeholder">' + em + '</div>';
+        : '<a href="/settings?add_image=' + encodeURIComponent(f.name) + '" class="m-placeholder" title="Add image for ' + esc(f.name) + '">' + em + '<span class="m-add-lbl">+ image</span></a>';
       var cal = f.calories ? '<span>' + f.calories + ' cal</span>' : '';
       var tags = '';
       if (f.tags && f.tags.length) {
@@ -1132,7 +1158,13 @@ function closeModal() {
   document.body.style.overflow = '';
 }
 
-document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeModal();
+  if (document.getElementById('overlay').classList.contains('open')) {
+    if (e.key === 'ArrowLeft') modalNav(-1);
+    if (e.key === 'ArrowRight') modalNav(1);
+  }
+});
 </script>
 </body>
 </html>`

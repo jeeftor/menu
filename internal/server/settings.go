@@ -345,6 +345,30 @@ document.getElementById('ex-form').addEventListener('submit', function(e) {
   }).then(function(r){ if(r.ok||r.status===204) location.reload(); else r.text().then(function(t){alert('Error: '+t);}); });
 });
 
+// Prefill food_name from ?add_image= query param (linked from modal placeholders)
+(function() {
+  var search = window.location.search.slice(1);
+  var addImg = '';
+  var pairs = search.split('&');
+  for (var i = 0; i < pairs.length; i++) {
+    var kv = pairs[i].split('=');
+    if (decodeURIComponent(kv[0]) === 'add_image') {
+      addImg = decodeURIComponent((kv[1] || '').replace(/\+/g,' '));
+      break;
+    }
+  }
+  if (addImg) {
+    var f = document.querySelector('#img-form [name="food_name"]');
+    if (f) {
+      f.value = addImg;
+      setTimeout(function() {
+        document.getElementById('img-form').scrollIntoView({behavior:'smooth', block:'center'});
+        setTimeout(function() { f.focus(); }, 250);
+      }, 150);
+    }
+  }
+})();
+
 document.getElementById('si-form').addEventListener('submit', function(e) {
   e.preventDefault();
   var f = e.target;
