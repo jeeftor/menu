@@ -104,6 +104,7 @@ func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Stor
 	s.mux.HandleFunc("/api/v1/food-images", s.handleAPIFoodImages)
 	s.mux.HandleFunc("/api/v1/favorites", s.handleAPIFavorites)
 	s.mux.HandleFunc("/api/v1/exclusions", s.handleAPIExclusions)
+	s.mux.HandleFunc("/api/v1/section-includes", s.handleAPISectionIncludes)
 	// MCP — Streamable HTTP transport
 	s.mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv }, nil))
 	return s
@@ -123,6 +124,43 @@ func (s *Server) exclusions(schoolSlug string) []string {
 	}
 	ex, _ := s.store.GetExclusions(schoolSlug)
 	return ex
+}
+
+// sectionIncludes returns the section include list for a school+meal from the store.
+// An empty result means "include all sections".
+func (s *Server) sectionIncludes(schoolSlug, mealType string) []string {
+	if s.store == nil {
+		return nil
+	}
+	inc, _ := s.store.GetSectionIncludes(schoolSlug, mealType)
+	return inc
+}
+
+// filterSections returns a copy of days with option sections filtered by the include list.
+// Non-option sections (Fruit, Vegetable, Milk, etc.) always pass through.
+// If includes is empty, days is returned unchanged.
+func filterSections(days map[string]menu.DayMenu, includes []string) map[string]menu.DayMenu {
+	if len(includes) == 0 {
+		return days
+	}
+	result := make(map[string]menu.DayMenu, len(days))
+	for k, dm := range days {
+		var secs []menu.Section
+		for _, sec := range dm.Sections {
+			if !strings.HasPrefix(sec.Name, "Option") {
+				secs = append(secs, sec)
+				continue
+			}
+			for _, inc := range includes {
+				if strings.EqualFold(sec.Name, inc) {
+					secs = append(secs, sec)
+					break
+				}
+			}
+		}
+		result[k] = menu.DayMenu{Date: dm.Date, Sections: secs}
+	}
+	return result
 }
 
 // resolveMenuImages overlays custom images from the store onto API-provided menus.
@@ -195,7 +233,8 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dayMenus = s.resolveMenuImages(dayMenus)
-		writeWeekPage(w, dayMenus, *school, d, mealType, s.version)
+		dayMenus = filterSections(dayMenus, s.sectionIncludes(school.Slug, mealType))
+		writeWeekPage(w, dayMenus, *school, d, mealType, s.version, s.exclusions(school.Slug))
 		return
 	}
 
@@ -228,6 +267,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dayMenus = s.resolveMenuImages(dayMenus)
+	dayMenus = filterSections(dayMenus, s.sectionIncludes(school.Slug, mealType))
 	writeCalendarPage(w, dayMenus, *school, year, month, mealType, s.version)
 }
 
@@ -421,7 +461,7 @@ func (s *Server) handleAPISummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, menu.BuildSummary(day, school.Name, s.exclusions(school.Slug)))
+	writeJSON(w, menu.BuildSummary(day, school.Name, s.exclusions(school.Slug), s.sectionIncludes(school.Slug, mealType)))
 }
 
 // findNextMenuDay searches forward from tomorrow for the next school day that
@@ -767,7 +807,7 @@ func monthDayCell(cd calDay, day menu.DayMenu, hasMenu bool) string {
 }
 
 // writeWeekPage renders a detailed single-week view.
-func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time, mealType, version string) {
+func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time, mealType, version string, exclusions []string) {
 	// Find Mon of this week
 	monday := anchor.AddDate(0, 0, -int(anchor.Weekday()-time.Monday))
 	if anchor.Weekday() == time.Sunday {
@@ -806,8 +846,10 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 			todayCls = " wk-today"
 		}
 		fmt.Fprintf(&cols, `<div class="wk-col%s">`, todayCls)
-		fmt.Fprintf(&cols, `<div class="wk-date"><div class="wk-dow">%s</div><div class="wk-day">%d</div><div class="wk-mon">%s</div></div>`,
-			d.Format("Monday"), d.Day(), d.Format("Jan"))
+		nsURL := fmt.Sprintf("https://%s.nutrislice.com/menu/%s/%s/%s/",
+			school.District, school.Slug, mealType, d.Format("2006-01-02"))
+		fmt.Fprintf(&cols, `<div class="wk-date"><div class="wk-dow">%s</div><div class="wk-day">%d</div><div class="wk-mon">%s</div><a class="wk-ns-link" href="%s" target="_blank" rel="noopener" title="View on Nutrislice">↗</a></div>`,
+			d.Format("Monday"), d.Day(), d.Format("Jan"), nsURL)
 
 		dm, ok := days[key]
 		if !ok {
@@ -826,6 +868,9 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 					fmt.Fprintf(&cols,
 						`<div class="wk-opt-lbl" style="color:%s">Option %s</div>`, text, label)
 					for _, f := range sec.Foods {
+						if menu.IsExcluded(f.Name, exclusions) {
+							continue
+						}
 						img := ""
 						if f.ImageURL != "" {
 							img = fmt.Sprintf(`<img src="%s" alt="%s" class="wk-img" loading="lazy">`,
@@ -842,10 +887,13 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 					cols.WriteString(`</div>`)
 				} else {
 					// Sides: vegetable, fruit, milk, condiments
-					names := make([]string, len(sec.Foods))
-					for i2, f := range sec.Foods {
-						names[i2] = html.EscapeString(f.Name)
+					var sideNames []string
+					for _, f := range sec.Foods {
+						if !menu.IsExcluded(f.Name, exclusions) {
+							sideNames = append(sideNames, html.EscapeString(f.Name))
+						}
 					}
+					names := sideNames
 					fmt.Fprintf(&cols,
 						`<div class="wk-side"><span class="wk-side-lbl">%s</span> %s</div>`,
 						html.EscapeString(sec.Name), strings.Join(names, " · "))
@@ -1121,6 +1169,7 @@ const weekPage = `<!DOCTYPE html>
     .wk-day{font-size:2rem;font-weight:800;color:#0F172A;line-height:1}
     .wk-today .wk-day{color:#1D4ED8}
     .wk-mon{font-size:.75rem;color:#94A3B8;font-weight:500;margin-top:.1rem}
+    .wk-ns-link{display:block;margin-top:.3rem;font-size:.65rem;color:#94A3B8;text-decoration:none;opacity:.6;transition:opacity .15s}.wk-ns-link:hover{opacity:1;color:#3B82F6}
     .wk-opt{margin:.6rem .6rem 0;border-radius:8px;overflow:hidden}
     .wk-opt-lbl{font-size:.65rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:.3rem .6rem}
     .wk-food{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;background:rgba(255,255,255,.7)}

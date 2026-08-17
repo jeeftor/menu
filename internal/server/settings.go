@@ -13,23 +13,26 @@ import (
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	var imgsHTML, favsHTML, exsHTML string
+	var imgsHTML, favsHTML, exsHTML, secIncHTML string
 	if s.store == nil {
 		msg := `<p class="warn">Settings require the server to be started with <code>--data-dir</code>.</p>`
-		imgsHTML, favsHTML, exsHTML = msg, msg, msg
+		imgsHTML, favsHTML, exsHTML, secIncHTML = msg, msg, msg, msg
 	} else {
 		imgs, _ := s.store.ListFoodImages()
 		favs, _ := s.store.ListFavorites("")
 		exs, _ := s.store.ListExclusions()
+		sis, _ := s.store.ListSectionIncludes()
 		imgsHTML = buildImagesTable(imgs)
 		favsHTML = buildFavoritesTable(favs)
 		exsHTML = buildExclusionsTable(exs)
+		secIncHTML = buildSectionIncludesTable(sis)
 	}
 
 	repl := strings.NewReplacer(
 		"[[IMAGES_TABLE]]", imgsHTML,
 		"[[FAVORITES_TABLE]]", favsHTML,
 		"[[EXCLUSIONS_TABLE]]", exsHTML,
+		"[[SECTION_INCLUDES_TABLE]]", secIncHTML,
 		"[[SCHOOL_OPTIONS]]", buildSchoolOptions(),
 	)
 	fmt.Fprint(w, repl.Replace(settingsPage))
@@ -98,6 +101,34 @@ func buildExclusionsTable(exs []store.Exclusion) string {
 			html.EscapeString(e.Pattern),
 			html.EscapeString(school),
 			e.ID,
+		))
+	}
+	sb.WriteString(`</tbody></table>`)
+	return sb.String()
+}
+
+func buildSectionIncludesTable(sis []store.SectionInclude) string {
+	if len(sis) == 0 {
+		return `<p class="empty">No section include rules. All option sections are shown.</p>`
+	}
+	var sb strings.Builder
+	sb.WriteString(`<table class="data-table"><thead><tr><th>Section</th><th>School</th><th>Meal</th><th></th></tr></thead><tbody>`)
+	for _, si := range sis {
+		school := si.SchoolSlug
+		if school == "" {
+			school = "All schools"
+		}
+		meal := si.MealType
+		if meal == "" {
+			meal = "All meals"
+		}
+		sb.WriteString(fmt.Sprintf(
+			`<tr><td><code>%s</code></td><td>%s</td><td>%s</td>`+
+				`<td><button class="del-btn" data-id="%d" onclick="delSecInc(this)">Delete</button></td></tr>`,
+			html.EscapeString(si.SectionName),
+			html.EscapeString(school),
+			html.EscapeString(meal),
+			si.ID,
 		))
 	}
 	sb.WriteString(`</tbody></table>`)
@@ -236,6 +267,36 @@ const settingsPage = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Section Includes -->
+  <div class="card">
+    <div class="card-hdr">
+      <h2>Section Include Rules</h2>
+      <p>Restrict which option sections count for a school+meal. When rules exist, only listed sections are shown. Example: add <code>Option 1</code> for Woodmen Roberts breakfast to hide the cereal bar.</p>
+    </div>
+    <div class="card-body">
+      [[SECTION_INCLUDES_TABLE]]
+      <form class="add-form" id="si-form">
+        <div class="field">
+          <label>Section Name</label>
+          <input name="section_name" placeholder="e.g. Option 1" required>
+        </div>
+        <div class="field">
+          <label>School</label>
+          <select name="school_slug">[[SCHOOL_OPTIONS]]</select>
+        </div>
+        <div class="field">
+          <label>Meal Type</label>
+          <select name="meal_type">
+            <option value="">All meals</option>
+            <option value="lunch">Lunch</option>
+            <option value="breakfast">Breakfast</option>
+          </select>
+        </div>
+        <button class="add-btn" type="submit">Add Rule</button>
+      </form>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -249,6 +310,10 @@ function delFav(btn) {
 }
 function delExclusion(btn) {
   fetch('/api/v1/exclusions?id=' + btn.dataset.id, {method:'DELETE'})
+    .then(function(r){ if(r.ok||r.status===204) location.reload(); else alert('Error: '+r.status); });
+}
+function delSecInc(btn) {
+  fetch('/api/v1/section-includes?id=' + btn.dataset.id, {method:'DELETE'})
     .then(function(r){ if(r.ok||r.status===204) location.reload(); else alert('Error: '+r.status); });
 }
 
@@ -276,6 +341,15 @@ document.getElementById('ex-form').addEventListener('submit', function(e) {
   fetch('/api/v1/exclusions', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({pattern: f.pattern.value, school_slug: f.school_slug.value})
+  }).then(function(r){ if(r.ok||r.status===204) location.reload(); else r.text().then(function(t){alert('Error: '+t);}); });
+});
+
+document.getElementById('si-form').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var f = e.target;
+  fetch('/api/v1/section-includes', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({section_name: f.section_name.value, school_slug: f.school_slug.value, meal_type: f.meal_type.value})
   }).then(function(r){ if(r.ok||r.status===204) location.reload(); else r.text().then(function(t){alert('Error: '+t);}); });
 });
 </script>

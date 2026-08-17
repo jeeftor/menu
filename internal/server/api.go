@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // ── /api/v1/food-images ───────────────────────────────────────────────────────
@@ -87,6 +88,52 @@ func (s *Server) handleAPIFavorites(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.store.RemoveFavorite(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ── /api/v1/section-includes ──────────────────────────────────────────────────
+
+func (s *Server) handleAPISectionIncludes(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.Error(w, "store not configured — start server with --data-dir", http.StatusServiceUnavailable)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		items, err := s.store.ListSectionIncludes()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, items)
+	case http.MethodPost:
+		var req struct {
+			SchoolSlug  string `json:"school_slug"`
+			MealType    string `json:"meal_type"`
+			SectionName string `json:"section_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.SectionName) == "" {
+			http.Error(w, "body must be JSON {school_slug, meal_type, section_name}", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.AddSectionInclude(req.SchoolSlug, req.MealType, req.SectionName); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case http.MethodDelete:
+		id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+		if err != nil {
+			http.Error(w, "missing or invalid ?id=", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.DeleteSectionInclude(id); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

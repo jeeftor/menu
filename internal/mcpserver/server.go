@@ -191,7 +191,7 @@ The "text" field is ready-to-speak: e.g. "Buffalo Cheese Pizza Sticks, Cheesebur
 			if err != nil {
 				return nil, menu.Summary{}, err
 			}
-			return nil, menu.BuildSummary(dm, school.Name, nil), nil
+			return nil, menu.BuildSummary(dm, school.Name, nil, nil), nil
 		},
 	)
 

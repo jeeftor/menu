@@ -15,18 +15,31 @@ type Summary struct {
 	Text string `json:"text"`
 }
 
-// BuildSummary extracts the main entrée choices from a DayMenu, filtering out
-// items matching any of the provided exclusion patterns (case-insensitive substring match).
-// Pass nil exclusions to skip filtering.
-func BuildSummary(day DayMenu, schoolName string, exclusions []string) Summary {
+// BuildSummary extracts the main entrée choices from a DayMenu.
+// If sectionIncludes is non-empty, only sections whose names are in that list are considered.
+// Exclusion patterns (case-insensitive substring) filter out individual option names.
+// Pass nil for either slice to skip that filter.
+func BuildSummary(day DayMenu, schoolName string, exclusions, sectionIncludes []string) Summary {
 	opts := day.OptionSections()
+	if len(sectionIncludes) > 0 {
+		var filtered []Section
+		for _, sec := range opts {
+			for _, inc := range sectionIncludes {
+				if strings.EqualFold(sec.Name, inc) {
+					filtered = append(filtered, sec)
+					break
+				}
+			}
+		}
+		opts = filtered
+	}
 	names := make([]string, 0, len(opts))
 	for _, sec := range opts {
 		if len(sec.Foods) == 0 {
 			continue
 		}
 		first := sec.Foods[0].Name
-		if isExcluded(first, exclusions) {
+		if IsExcluded(first, exclusions) {
 			continue
 		}
 		names = append(names, first)
@@ -40,8 +53,9 @@ func BuildSummary(day DayMenu, schoolName string, exclusions []string) Summary {
 	}
 }
 
-// isExcluded reports whether name contains any of the exclusion patterns (case-insensitive).
-func isExcluded(name string, exclusions []string) bool {
+// IsExcluded reports whether name contains any of the exclusion patterns (case-insensitive).
+// Exported so rendering code can reuse this logic.
+func IsExcluded(name string, exclusions []string) bool {
 	lower := strings.ToLower(name)
 	for _, pat := range exclusions {
 		if strings.Contains(lower, strings.ToLower(pat)) {

@@ -39,6 +39,16 @@ type Exclusion struct {
 	Pattern    string
 }
 
+// SectionInclude specifies which option sections are included for a given school+meal.
+// When any include rules exist for a school+meal combo, only those sections count.
+// Non-option sections (Fruit, Vegetable, Milk, etc.) are always shown.
+type SectionInclude struct {
+	ID          int64
+	SchoolSlug  string // empty = all schools
+	MealType    string // empty = all meals
+	SectionName string // e.g. "Option 1"
+}
+
 // Open opens (or creates) the SQLite database at path and runs migrations.
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -81,6 +91,14 @@ func (s *Store) migrate() error {
 			school_slug TEXT NOT NULL DEFAULT '',
 			pattern     TEXT NOT NULL,
 			UNIQUE(school_slug, pattern)
+		);
+
+		CREATE TABLE IF NOT EXISTS section_includes (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			school_slug  TEXT NOT NULL DEFAULT '',
+			meal_type    TEXT NOT NULL DEFAULT '',
+			section_name TEXT NOT NULL,
+			UNIQUE(school_slug, meal_type, section_name)
 		);
 
 		-- Seed default exclusions for Woodmen Roberts (sun butter is a standing alternative)
@@ -253,6 +271,65 @@ func (s *Store) ListExclusions() ([]Exclusion, error) {
 			return nil, err
 		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ── Section Includes ─────────────────────────────────────────────────────────
+
+// GetSectionIncludes returns the section names to include for a given school+meal.
+// An empty result means "include all sections" (no filter).
+func (s *Store) GetSectionIncludes(schoolSlug, mealType string) ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT section_name FROM section_includes WHERE school_slug = ? AND meal_type = ?`,
+		schoolSlug, mealType,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// AddSectionInclude adds a section include rule.
+func (s *Store) AddSectionInclude(schoolSlug, mealType, sectionName string) error {
+	_, err := s.db.Exec(
+		`INSERT OR IGNORE INTO section_includes(school_slug, meal_type, section_name) VALUES(?, ?, ?)`,
+		schoolSlug, strings.ToLower(strings.TrimSpace(mealType)), strings.TrimSpace(sectionName),
+	)
+	return err
+}
+
+// DeleteSectionInclude removes a section include rule by ID.
+func (s *Store) DeleteSectionInclude(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM section_includes WHERE id = ?`, id)
+	return err
+}
+
+// ListSectionIncludes returns all section include rules.
+func (s *Store) ListSectionIncludes() ([]SectionInclude, error) {
+	rows, err := s.db.Query(
+		`SELECT id, school_slug, meal_type, section_name FROM section_includes ORDER BY school_slug, meal_type, section_name`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SectionInclude
+	for rows.Next() {
+		var si SectionInclude
+		if err := rows.Scan(&si.ID, &si.SchoolSlug, &si.MealType, &si.SectionName); err != nil {
+			return nil, err
+		}
+		out = append(out, si)
 	}
 	return out, rows.Err()
 }
