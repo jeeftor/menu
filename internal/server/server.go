@@ -103,20 +103,21 @@ func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Stor
 	s := &Server{client: client, port: port, version: version, mux: http.NewServeMux(), mcpServer: mcpSrv, store: st}
 	s.mux.HandleFunc("/", s.handleRoot)
 	s.mux.HandleFunc("/calendar", s.handleCalendar)
-	// REST API v1
-	s.mux.HandleFunc("/settings", s.handleSettings)
+	// REST API v1 — public read endpoints
 	s.mux.HandleFunc("/api/v1/schools", s.handleAPISchools)
 	s.mux.HandleFunc("/api/v1/lunch", s.handleAPILunch)
 	s.mux.HandleFunc("/api/v1/lunch/summary", s.handleAPISummary)
 	s.mux.HandleFunc("/api/v1/lunch/week", s.handleAPILunchWeek)
 	s.mux.HandleFunc("/api/v1/lunch/month", s.handleAPILunchMonth)
-	s.mux.HandleFunc("/api/v1/food-images", s.handleAPIFoodImages)
-	s.mux.HandleFunc("/api/v1/favorites", s.handleAPIFavorites)
-	s.mux.HandleFunc("/api/v1/exclusions", s.handleAPIExclusions)
-	s.mux.HandleFunc("/api/v1/section-includes", s.handleAPISectionIncludes)
-	s.mux.HandleFunc("/api/v1/section-includes/order", s.handleAPISectionIncludesOrder)
-	s.mux.HandleFunc("/api/v1/missing-images", s.handleAPIMissingImages)
 	s.mux.HandleFunc("/api/v1/sections", s.handleAPISections)
+	// LAN-only: settings page and config-write endpoints
+	s.mux.HandleFunc("/settings", s.requireLAN(s.handleSettings))
+	s.mux.HandleFunc("/api/v1/food-images", s.requireLANForWrites(s.handleAPIFoodImages))
+	s.mux.HandleFunc("/api/v1/favorites", s.requireLANForWrites(s.handleAPIFavorites))
+	s.mux.HandleFunc("/api/v1/exclusions", s.requireLANForWrites(s.handleAPIExclusions))
+	s.mux.HandleFunc("/api/v1/section-includes", s.requireLANForWrites(s.handleAPISectionIncludes))
+	s.mux.HandleFunc("/api/v1/section-includes/order", s.requireLANForWrites(s.handleAPISectionIncludesOrder))
+	s.mux.HandleFunc("/api/v1/missing-images", s.requireLANForWrites(s.handleAPIMissingImages))
 	// Alexa skill endpoint
 	if alexaCfg != nil {
 		s.alexaHandler = newAlexaHandler(s, alexaCfg)
@@ -134,6 +135,38 @@ func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	slog.Info("server listening", "addr", "http://localhost"+addr)
 	return http.ListenAndServe(addr, s.mux)
+}
+
+// isWAN returns true when the request arrived via the Cloudflare tunnel.
+// Caddy's wan_auth snippet gates on the presence of Cf-Connecting-Ip (injected
+// by Cloudflare's edge); LAN and Tailscale requests never carry this header.
+// We reuse the same signal so both layers agree on what "WAN" means.
+func isWAN(r *http.Request) bool {
+	return r.Header.Get("Cf-Connecting-Ip") != ""
+}
+
+// requireLAN blocks all requests that arrived via the Cloudflare tunnel (WAN).
+// LAN and Tailscale traffic passes through unconditionally.
+func (s *Server) requireLAN(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if isWAN(r) {
+			http.Error(w, "403 Forbidden — this page requires local network access", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// requireLANForWrites allows GET/HEAD from anywhere but blocks mutating methods
+// (POST, PUT, DELETE, PATCH) when the request arrives from WAN.
+func (s *Server) requireLANForWrites(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && isWAN(r) {
+			http.Error(w, "403 Forbidden — configuration changes require local network access", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // exclusions returns per-school summary exclusion patterns from the store, or nil if no store.
@@ -273,7 +306,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		dayMenus = s.resolveMenuImages(dayMenus)
 		weekIncludes := s.sectionIncludes(school.Slug, mealType)
 		dayMenus = filterSections(dayMenus, weekIncludes)
-		writeWeekPage(w, dayMenus, *school, d, mealType, s.version, s.exclusions(school.Slug), weekIncludes)
+		writeWeekPage(w, dayMenus, *school, d, mealType, s.version, s.exclusions(school.Slug), weekIncludes, !isWAN(r))
 		return
 	}
 
@@ -308,7 +341,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	dayMenus = s.resolveMenuImages(dayMenus)
 	monthIncludes := s.sectionIncludes(school.Slug, mealType)
 	dayMenus = filterSections(dayMenus, monthIncludes)
-	writeCalendarPage(w, dayMenus, *school, year, month, mealType, s.version, monthIncludes)
+	writeCalendarPage(w, dayMenus, *school, year, month, mealType, s.version, monthIncludes, !isWAN(r))
 }
 
 func (s *Server) handleAPILunch(w http.ResponseWriter, r *http.Request) {
@@ -614,7 +647,7 @@ type jsonSection struct {
 	Foods []jsonFood `json:"foods"`
 }
 
-func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, year, month int, mealType, version string, sectionOrder []string) {
+func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, year, month int, mealType, version string, sectionOrder []string, isLAN bool) {
 	monthName := time.Month(month).String()
 	prevM, prevY := month-1, year
 	if prevM == 0 {
@@ -732,6 +765,18 @@ func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, scho
 		"[[CLR_JSON]]", string(clrJSON),
 		"[[EMOJI_JSON]]", string(emojiJSON),
 		"[[VERSION]]", version,
+		"[[SETTINGS_LINK]]", func() string {
+			if isLAN {
+				return `<a class="nav-btn" href="/settings" title="Settings">&#x2699;</a>`
+			}
+			return ""
+		}(),
+		"[[IS_LAN]]", func() string {
+			if isLAN {
+				return "true"
+			}
+			return "false"
+		}(),
 	)
 	fmt.Fprint(w, repl.Replace(calendarPage))
 }
@@ -893,7 +938,7 @@ func monthDayCell(cd calDay, day menu.DayMenu, hasMenu bool) string {
 }
 
 // writeWeekPage renders a detailed single-week view.
-func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time, mealType, version string, exclusions []string, sectionOrder []string) {
+func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time, mealType, version string, exclusions []string, sectionOrder []string, isLAN bool) {
 	// Find Mon of this week
 	monday := anchor.AddDate(0, 0, -int(anchor.Weekday()-time.Monday))
 	if anchor.Weekday() == time.Sunday {
@@ -1021,6 +1066,18 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 		"[[CLR_JSON]]", string(clrJSON),
 		"[[EMOJI_JSON]]", string(emojiJSON),
 		"[[VERSION]]", version,
+		"[[SETTINGS_LINK]]", func() string {
+			if isLAN {
+				return `<a class="nav-btn" href="/settings" title="Settings">&#x2699;</a>`
+			}
+			return ""
+		}(),
+		"[[IS_LAN]]", func() string {
+			if isLAN {
+				return "true"
+			}
+			return "false"
+		}(),
 	)
 	fmt.Fprint(w, repl.Replace(weekPage))
 }
@@ -1180,7 +1237,7 @@ const calendarPage = `<!DOCTYPE html>
       <a class="view-btn" href="[[WEEK_LINK]]">Week</a>
     </div>
     <a class="nav-btn" href="/api" title="API Explorer">API</a>
-    <a class="nav-btn" href="/settings" title="Settings">&#x2699;</a>
+    [[SETTINGS_LINK]]
   </nav>
 </header>
 
@@ -1218,6 +1275,7 @@ var MENU = [[MENU_JSON]];
 var ORDER = [[ORDER_JSON]];
 var CLR = [[CLR_JSON]];
 var EMOJI = [[EMOJI_JSON]];
+var IS_LAN = [[IS_LAN]];
 var DATES = Object.keys(MENU).sort();
 var CUR_DATE = null;
 var SCHOOL = '[[SCHOOL_SLUG]]';
@@ -1256,7 +1314,7 @@ function openDay(dateStr) {
     return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
   }) : secs;
 
-  var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  var isTouch = !IS_LAN || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
   var html = '';
   for (var i = 0; i < sorted.length; i++) {
     var sec = sorted[i];
@@ -1461,7 +1519,7 @@ const weekPage = `<!DOCTYPE html>
       <a class="view-btn active" href="#">Week</a>
     </div>
     <a class="nav-btn" href="/api" title="API Explorer">API</a>
-    <a class="nav-btn" href="/settings" title="Settings">&#x2699;</a>
+    [[SETTINGS_LINK]]
   </div>
 </header>
 <div class="school-bar">[[SCHOOL_SEL]]</div>
