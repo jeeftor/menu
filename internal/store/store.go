@@ -43,11 +43,11 @@ type Exclusion struct {
 // When any include rules exist for a school+meal combo, only those sections count.
 // Non-option sections (Fruit, Vegetable, Milk, etc.) are always shown in Option-N mode.
 type SectionInclude struct {
-	ID          int64
-	SchoolSlug  string // empty = all schools
-	MealType    string // empty = all meals
-	SectionName string // e.g. "Option 1" or "Entree"
-	Position    int    // display order within the school+meal group (0-based)
+	ID          int64  `json:"id"`
+	SchoolSlug  string `json:"school_slug"` // empty = all schools
+	MealType    string `json:"meal_type"`   // empty = all meals
+	SectionName string `json:"section_name"` // e.g. "Option 1" or "Entree"
+	Position    int    `json:"position"`    // display order within the school+meal group (0-based)
 }
 
 // Open opens (or creates) the SQLite database at path and runs migrations.
