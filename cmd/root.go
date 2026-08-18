@@ -51,7 +51,7 @@ func initConfig() {
 		viper.AddConfigPath("$HOME/.config/menu")
 	}
 
-	viper.SetEnvPrefix("FOOD")
+	viper.SetEnvPrefix("MENU")
 	viper.AutomaticEnv()
 
 	viper.SetDefault("port", 8080)
