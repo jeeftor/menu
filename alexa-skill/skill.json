@@ -5,10 +5,10 @@
         "en-US": {
           "summary": "School lunch menu for the kids",
           "examplePhrases": [
-            "Alexa, open Menu",
-            "Alexa, ask Menu what's for lunch tomorrow"
+            "Alexa, open School Lunch",
+            "Alexa, ask School Lunch what's for lunch tomorrow"
           ],
-          "name": "Menu",
+          "name": "School Lunch",
           "description": "Ask what's on the school lunch menu today, tomorrow, or any day of the week."
         }
       },

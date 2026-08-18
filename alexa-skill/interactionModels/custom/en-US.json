@@ -1,7 +1,7 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "menu",
+      "invocationName": "school lunch",
       "intents": [
         {
           "name": "MenuQueryIntent",
@@ -17,15 +17,20 @@
           "samples": [
             "what's for lunch",
             "what's for lunch {date}",
+            "what is for lunch",
+            "what is for lunch {date}",
             "what's on the menu",
             "what's on the menu for {date}",
+            "what is on the menu",
+            "what is on the menu for {date}",
             "what are they serving",
             "what are they serving {date}",
-            "what is lunch {date}",
-            "what is for lunch {date}",
             "what's for lunch at school",
             "what's for lunch at school {date}",
-            "what's the lunch menu {date}"
+            "what is for lunch at school",
+            "what is for lunch at school {date}",
+            "what's the lunch menu {date}",
+            "what's the lunch menu"
           ]
         },
         {

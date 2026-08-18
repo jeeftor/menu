@@ -27,7 +27,7 @@ need Authentik authentication.
 
 - `skill.json` — skill manifest. Endpoint is `https://menu.vookie.net/alexa`.
 - `interactionModels/custom/en-US.json` — voice model with the
-  `MenuQueryIntent` and sample utterances.
+  `MenuQueryIntent` and sample utterances. Invocation name: `school lunch`.
 - `../internal/alexa/` — Go package that parses ASK requests, verifies
   signatures, and builds responses.
 
@@ -111,7 +111,7 @@ Generate a session secret with: `openssl rand -base64 32`.
 1. Create a new Custom skill.
 2. Under **Build → Interaction Model**, upload or paste the contents of
    `interactionModels/custom/en-US.json`.
-   - Invocation name: `menu`
+   - Invocation name: `school lunch`
 3. Under **Build → Endpoint**:
    - Service endpoint type: **HTTPS**
    - Default region: `https://menu.vookie.net/alexa`
@@ -153,14 +153,17 @@ Live Alexa test:
   `10.0.0.15`).
 - Start `menu serve` with your real skill ID and verification enabled.
 - In the Alexa Developer Console, use the **Test** tab or an Echo device.
-- Say: *"Alexa, ask Menu what's for lunch tomorrow."*
+- Say: *"Alexa, ask School Lunch what's for lunch tomorrow."*
 
 ## What can be asked
 
-- "What's for lunch?"
-- "What's for lunch tomorrow?"
-- "What's on the menu for Monday?"
-- "What are they serving today?"
+Invocation name: **"school lunch"**
+
+- "Alexa, ask School Lunch what's for lunch."
+- "Alexa, ask School Lunch what's for lunch tomorrow."
+- "Alexa, ask School Lunch what's on the menu for Monday."
+- "Alexa, ask School Lunch what are they serving today."
+- "Alexa, ask School Lunch what is for lunch at school today."
 
 The `date` slot uses `AMAZON.DATE`, so relative references like today,
 tomorrow, and weekdays work automatically.
