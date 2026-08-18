@@ -17,7 +17,9 @@
             "food"
           ],
           "name": "School Lunch",
-          "description": "Quickly check the school lunch menu for any day. Just ask, \"Alexa, ask School Lunch what's for lunch tomorrow\" or \"Alexa, ask School Lunch what's on the menu for Monday.\""
+          "description": "Quickly check the school lunch menu for any day. Just ask, \"Alexa, ask School Lunch what's for lunch tomorrow\" or \"Alexa, ask School Lunch what's on the menu for Monday.\"",
+          "smallIconUri": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/icons/icon-108.png",
+          "largeIconUri": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/icons/icon-512.png"
         }
       },
       "category": "KIDS",

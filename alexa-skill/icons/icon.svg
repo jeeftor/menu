@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background -->
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#F59E0B"/>
+
+  <!-- Plate -->
+  <circle cx="256" cy="256" r="160" fill="#FFFFFF"/>
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#E2E8F0" stroke-width="6"/>
+
+  <!-- Main dish -->
+  <rect x="196" y="196" width="120" height="72" rx="16" fill="#D97706"/>
+
+  <!-- Green vegetable -->
+  <circle cx="200" cy="320" r="36" fill="#22C55E"/>
+  <circle cx="200" cy="320" r="28" fill="#4ADE80"/>
+
+  <!-- Red fruit -->
+  <circle cx="312" cy="320" r="32" fill="#EF4444"/>
+  <path d="M312 288 Q 322 270 332 288" stroke="#166534" stroke-width="6" fill="none"/>
+</svg>
