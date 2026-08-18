@@ -41,12 +41,13 @@ type Exclusion struct {
 
 // SectionInclude specifies which option sections are included for a given school+meal.
 // When any include rules exist for a school+meal combo, only those sections count.
-// Non-option sections (Fruit, Vegetable, Milk, etc.) are always shown.
+// Non-option sections (Fruit, Vegetable, Milk, etc.) are always shown in Option-N mode.
 type SectionInclude struct {
 	ID          int64
 	SchoolSlug  string // empty = all schools
 	MealType    string // empty = all meals
-	SectionName string // e.g. "Option 1"
+	SectionName string // e.g. "Option 1" or "Entree"
+	Position    int    // display order within the school+meal group (0-based)
 }
 
 // Open opens (or creates) the SQLite database at path and runs migrations.
@@ -98,6 +99,7 @@ func (s *Store) migrate() error {
 			school_slug  TEXT NOT NULL DEFAULT '',
 			meal_type    TEXT NOT NULL DEFAULT '',
 			section_name TEXT NOT NULL,
+			position     INTEGER NOT NULL DEFAULT 0,
 			UNIQUE(school_slug, meal_type, section_name)
 		);
 
@@ -105,7 +107,12 @@ func (s *Store) migrate() error {
 		INSERT OR IGNORE INTO summary_exclusions (school_slug, pattern)
 		VALUES ('woodmen-roberts-elementary-school', 'sun butter');
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Add position column to existing section_includes tables (idempotent).
+	_, _ = s.db.Exec(`ALTER TABLE section_includes ADD COLUMN position INTEGER NOT NULL DEFAULT 0`)
+	return nil
 }
 
 // ── Food Images ───────────────────────────────────────────────────────────────
@@ -277,11 +284,11 @@ func (s *Store) ListExclusions() ([]Exclusion, error) {
 
 // ── Section Includes ─────────────────────────────────────────────────────────
 
-// GetSectionIncludes returns the section names to include for a given school+meal.
+// GetSectionIncludes returns section names for a given school+meal, ordered by position.
 // An empty result means "include all sections" (no filter).
 func (s *Store) GetSectionIncludes(schoolSlug, mealType string) ([]string, error) {
 	rows, err := s.db.Query(
-		`SELECT section_name FROM section_includes WHERE school_slug = ? AND meal_type = ?`,
+		`SELECT section_name FROM section_includes WHERE school_slug = ? AND meal_type = ? ORDER BY position, id`,
 		schoolSlug, mealType,
 	)
 	if err != nil {
@@ -299,13 +306,43 @@ func (s *Store) GetSectionIncludes(schoolSlug, mealType string) ([]string, error
 	return out, rows.Err()
 }
 
-// AddSectionInclude adds a section include rule.
+// AddSectionInclude adds a section include rule, assigning the next available position.
 func (s *Store) AddSectionInclude(schoolSlug, mealType, sectionName string) error {
+	meal := strings.ToLower(strings.TrimSpace(mealType))
+	name := strings.TrimSpace(sectionName)
+	var maxPos int
+	s.db.QueryRow(
+		`SELECT COALESCE(MAX(position)+1, 0) FROM section_includes WHERE school_slug = ? AND meal_type = ?`,
+		schoolSlug, meal,
+	).Scan(&maxPos)
 	_, err := s.db.Exec(
-		`INSERT OR IGNORE INTO section_includes(school_slug, meal_type, section_name) VALUES(?, ?, ?)`,
-		schoolSlug, strings.ToLower(strings.TrimSpace(mealType)), strings.TrimSpace(sectionName),
+		`INSERT OR IGNORE INTO section_includes(school_slug, meal_type, section_name, position) VALUES(?, ?, ?, ?)`,
+		schoolSlug, meal, name, maxPos,
 	)
 	return err
+}
+
+// ReorderSectionIncludes sets the position of each section in orderedNames (0-based index).
+// Sections not in the list are unaffected.
+func (s *Store) ReorderSectionIncludes(schoolSlug, mealType string, orderedNames []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(
+		`UPDATE section_includes SET position = ? WHERE school_slug = ? AND meal_type = ? AND section_name = ?`,
+	)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for i, name := range orderedNames {
+		if _, err := stmt.Exec(i, schoolSlug, mealType, name); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // DeleteSectionInclude removes a section include rule by ID.
@@ -314,10 +351,10 @@ func (s *Store) DeleteSectionInclude(id int64) error {
 	return err
 }
 
-// ListSectionIncludes returns all section include rules.
+// ListSectionIncludes returns all section include rules ordered by school, meal, position.
 func (s *Store) ListSectionIncludes() ([]SectionInclude, error) {
 	rows, err := s.db.Query(
-		`SELECT id, school_slug, meal_type, section_name FROM section_includes ORDER BY school_slug, meal_type, section_name`,
+		`SELECT id, school_slug, meal_type, section_name, position FROM section_includes ORDER BY school_slug, meal_type, position, id`,
 	)
 	if err != nil {
 		return nil, err
@@ -326,7 +363,7 @@ func (s *Store) ListSectionIncludes() ([]SectionInclude, error) {
 	var out []SectionInclude
 	for rows.Next() {
 		var si SectionInclude
-		if err := rows.Scan(&si.ID, &si.SchoolSlug, &si.MealType, &si.SectionName); err != nil {
+		if err := rows.Scan(&si.ID, &si.SchoolSlug, &si.MealType, &si.SectionName, &si.Position); err != nil {
 			return nil, err
 		}
 		out = append(out, si)

@@ -191,6 +191,17 @@ const settingsPage = `<!DOCTYPE html>
     .empty{color:#94A3B8;font-size:.82rem;font-style:italic}
     .warn{color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;padding:.7rem 1rem;border-radius:8px;font-size:.85rem}
     code{background:#F1F5F9;padding:.1rem .3rem;border-radius:4px;font-size:.78rem}
+    .si-sub-lbl{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#475569}
+    .si-avail-btn{font-size:.78rem;padding:.25rem .6rem;border-radius:20px;border:1px solid #CBD5E1;background:#fff;cursor:pointer;transition:all .15s;color:#475569}
+    .si-avail-btn:hover{border-color:#3B82F6;color:#3B82F6}
+    .si-avail-btn.active{background:#3B82F6;border-color:#3B82F6;color:#fff}
+    .si-chip{display:flex;align-items:center;gap:.35rem;background:#1E293B;border:1px solid #334155;color:#E2E8F0;padding:.3rem .65rem .3rem .45rem;border-radius:20px;font-size:.78rem;cursor:grab;user-select:none;transition:opacity .15s;position:relative}
+    .si-chip:active{cursor:grabbing;opacity:.7}
+    .si-chip.drag-over{border-color:#3B82F6;background:#1E3A5F}
+    .si-chip-handle{color:#64748B;font-size:.9rem;margin-right:.1rem}
+    .si-chip-del{background:none;border:none;color:#64748B;font-size:.8rem;cursor:pointer;padding:0 .1rem;line-height:1}
+    .si-chip-del:hover{color:#EF4444}
+    .si-pop{position:fixed;z-index:9999;background:#1E293B;border:1px solid #334155;border-radius:10px;padding:.7rem .9rem;max-width:240px;font-size:.75rem;color:#E2E8F0;box-shadow:0 8px 24px rgba(0,0,0,.3);pointer-events:none}
   </style>
 </head>
 <body>
@@ -272,35 +283,44 @@ const settingsPage = `<!DOCTYPE html>
   <div class="card">
     <div class="card-hdr">
       <h2>Section Include Rules</h2>
-      <p>Choose which sections to show for a school+meal. Pick a school and meal below — sections found in the cache will appear as checkboxes.</p>
+      <p>Control which sections appear and in what order. Pick a school and meal — select sections, then drag chips to reorder. Hover a chip to preview today's items.</p>
     </div>
     <div class="card-body">
       [[SECTION_INCLUDES_TABLE]]
-      <div class="add-form" style="flex-direction:column;gap:.75rem">
+      <div style="display:flex;flex-direction:column;gap:.8rem">
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end">
           <div class="field">
             <label>School</label>
-            <select id="si-school" onchange="siLoadSections()">
+            <select id="si-school" onchange="siLoad()">
               <option value="">Pick a school…</option>
               [[SCHOOL_OPTIONS]]
             </select>
           </div>
           <div class="field">
-            <label>Meal Type</label>
-            <select id="si-meal" onchange="siLoadSections()">
+            <label>Meal</label>
+            <select id="si-meal" onchange="siLoad()">
               <option value="lunch">Lunch</option>
               <option value="breakfast">Breakfast</option>
             </select>
           </div>
         </div>
-        <div id="si-sections" style="display:none">
-          <div style="font-size:.75rem;font-weight:600;color:#475569;margin-bottom:.4rem">Sections found in cache — check to include:</div>
-          <div id="si-checklist" style="display:flex;flex-wrap:wrap;gap:.4rem .75rem"></div>
-          <button class="add-btn" style="margin-top:.65rem" onclick="siSaveChecked()">Save Selected</button>
-          <span id="si-status" style="font-size:.8rem;color:#64748B;margin-left:.5rem"></span>
+        <div id="si-panel" style="display:none;flex-direction:column;gap:.65rem">
+          <div>
+            <div class="si-sub-lbl">Available sections — click to toggle:</div>
+            <div id="si-avail" style="display:flex;flex-wrap:wrap;gap:.35rem .5rem;margin-top:.35rem"></div>
+          </div>
+          <div>
+            <div class="si-sub-lbl">Included order — drag to reorder:</div>
+            <div id="si-chips" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem;min-height:2.2rem;padding:.3rem;background:#F8FAFC;border:1px dashed #CBD5E1;border-radius:8px"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:.75rem">
+            <button class="add-btn" onclick="siSave()">Save Order</button>
+            <span id="si-status" style="font-size:.8rem;color:#64748B"></span>
+          </div>
         </div>
-        <div id="si-empty" style="font-size:.82rem;color:#94A3B8;font-style:italic;display:none">No cached data found for this school+meal. Visit the calendar for that school first to populate the cache.</div>
+        <div id="si-empty" style="font-size:.82rem;color:#94A3B8;font-style:italic;display:none">No cached data found. Visit the calendar for this school first to populate the cache.</div>
       </div>
+      <div id="si-pop" class="si-pop" style="display:none"></div>
     </div>
   </div>
 
@@ -390,53 +410,194 @@ document.getElementById('ex-form').addEventListener('submit', function(e) {
   }
 })();
 
-function siLoadSections() {
+// ── Section Includes: drag-chip UI ──────────────────────────────────────────
+var siTodayCache = {};
+var siDragSrc = null;
+
+function siLoad() {
   var school = document.getElementById('si-school').value;
   var meal = document.getElementById('si-meal').value;
-  var sectionsDiv = document.getElementById('si-sections');
-  var emptyDiv = document.getElementById('si-empty');
-  var checklist = document.getElementById('si-checklist');
-  if (!school) { sectionsDiv.style.display='none'; emptyDiv.style.display='none'; return; }
-  sectionsDiv.style.display='none'; emptyDiv.style.display='none';
-  checklist.innerHTML = '<em style="color:#64748B;font-size:.78rem">Loading…</em>';
-  fetch('/api/v1/sections?school=' + encodeURIComponent(school) + '&meal=' + encodeURIComponent(meal))
-    .then(function(r){ return r.json(); })
-    .then(function(names) {
-      checklist.innerHTML = '';
-      if (!names || names.length === 0) { emptyDiv.style.display='block'; return; }
-      names.forEach(function(name) {
-        var lbl = document.createElement('label');
-        lbl.style.cssText = 'display:flex;align-items:center;gap:.3rem;font-size:.82rem;cursor:pointer;padding:.2rem .5rem;border:1px solid #E2E8F0;border-radius:6px;background:#F8FAFC';
-        var cb = document.createElement('input');
-        cb.type = 'checkbox'; cb.value = name;
-        lbl.appendChild(cb);
-        lbl.appendChild(document.createTextNode(name));
-        checklist.appendChild(lbl);
-      });
-      sectionsDiv.style.display='block';
-      document.getElementById('si-status').textContent = '';
-    })
-    .catch(function(){ emptyDiv.style.display='block'; });
+  var panel = document.getElementById('si-panel');
+  var empty = document.getElementById('si-empty');
+  panel.style.display = 'none'; empty.style.display = 'none';
+  siTodayCache = {};
+  if (!school) return;
+
+  // Fetch both available sections and existing includes in parallel
+  Promise.all([
+    fetch('/api/v1/sections?school=' + encodeURIComponent(school) + '&meal=' + encodeURIComponent(meal)).then(function(r){ return r.json(); }),
+    fetch('/api/v1/section-includes?school=' + encodeURIComponent(school) + '&meal=' + encodeURIComponent(meal)).then(function(r){ return r.json(); })
+  ]).then(function(results) {
+    var all = results[0] || [];
+    var included = results[1] || [];
+    if (!all.length) { empty.style.display = 'block'; return; }
+    siRenderAvail(all, included);
+    siRenderChips(included);
+    panel.style.display = 'flex';
+    document.getElementById('si-status').textContent = '';
+  }).catch(function(){ empty.style.display = 'block'; });
 }
 
-function siSaveChecked() {
+function siRenderAvail(all, included) {
+  var incSet = {};
+  for (var i = 0; i < included.length; i++) incSet[included[i]] = true;
+  var avail = document.getElementById('si-avail');
+  avail.innerHTML = '';
+  all.forEach(function(name) {
+    var btn = document.createElement('button');
+    btn.className = 'si-avail-btn' + (incSet[name] ? ' active' : '');
+    btn.textContent = name;
+    btn.onclick = function() { siToggle(name, btn); };
+    avail.appendChild(btn);
+  });
+}
+
+function siToggle(name, btn) {
+  var chips = document.getElementById('si-chips');
+  var existing = chips.querySelector('[data-sec="' + CSS.escape(name) + '"]');
+  if (existing) {
+    existing.remove();
+    btn.classList.remove('active');
+  } else {
+    btn.classList.add('active');
+    siAddChip(name);
+  }
+}
+
+function siRenderChips(names) {
+  var chips = document.getElementById('si-chips');
+  chips.innerHTML = '';
+  names.forEach(function(name) { siAddChip(name); });
+}
+
+function siAddChip(name) {
+  var chips = document.getElementById('si-chips');
+  var chip = document.createElement('div');
+  chip.className = 'si-chip';
+  chip.setAttribute('draggable', 'true');
+  chip.setAttribute('data-sec', name);
+  chip.innerHTML = '<span class="si-chip-handle">&#x2807;</span>' +
+    '<span>' + escHtml(name) + '</span>' +
+    '<button class="si-chip-del" title="Remove" onclick="siRemoveChip(this)">&times;</button>';
+
+  chip.addEventListener('dragstart', function(e) {
+    siDragSrc = chip;
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  chip.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    chip.classList.add('drag-over');
+  });
+  chip.addEventListener('dragleave', function() { chip.classList.remove('drag-over'); });
+  chip.addEventListener('drop', function(e) {
+    e.preventDefault();
+    chip.classList.remove('drag-over');
+    if (siDragSrc && siDragSrc !== chip) {
+      chips.insertBefore(siDragSrc, chip);
+    }
+  });
+  chip.addEventListener('dragend', function() { chip.classList.remove('drag-over'); });
+
+  // Hover preview
+  chip.addEventListener('mouseenter', function(e) { siShowPop(name, e); });
+  chip.addEventListener('mousemove', function(e) { siMovePop(e); });
+  chip.addEventListener('mouseleave', function() { siHidePop(); });
+
+  chips.appendChild(chip);
+}
+
+function siRemoveChip(btn) {
+  var chip = btn.parentElement;
+  var name = chip.getAttribute('data-sec');
+  chip.remove();
+  var ab = document.querySelector('#si-avail .si-avail-btn.active');
+  var avail = document.getElementById('si-avail');
+  var btns = avail.querySelectorAll('.si-avail-btn');
+  for (var i = 0; i < btns.length; i++) {
+    if (btns[i].textContent === name) { btns[i].classList.remove('active'); break; }
+  }
+}
+
+function siSave() {
   var school = document.getElementById('si-school').value;
   var meal = document.getElementById('si-meal').value;
-  var checks = document.querySelectorAll('#si-checklist input[type=checkbox]:checked');
-  if (!checks.length) { document.getElementById('si-status').textContent = 'Nothing checked.'; return; }
+  var chips = document.getElementById('si-chips').querySelectorAll('.si-chip');
   var status = document.getElementById('si-status');
+  if (!chips.length) { status.textContent = 'No sections selected.'; return; }
+  var names = [];
+  for (var i = 0; i < chips.length; i++) names.push(chips[i].getAttribute('data-sec'));
   status.textContent = 'Saving…';
-  var promises = [];
-  for (var i = 0; i < checks.length; i++) {
-    promises.push(fetch('/api/v1/section-includes', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({section_name: checks[i].value, school_slug: school, meal_type: meal})
-    }));
+  // POST any newly-added sections (existing ones ignored via INSERT OR IGNORE),
+  // then reorder all of them by position in one PUT call.
+  var seq = Promise.resolve();
+  names.forEach(function(name) {
+    seq = seq.then(function() {
+      return fetch('/api/v1/section-includes', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({section_name: name, school_slug: school, meal_type: meal})
+      });
+    });
+  });
+  seq.then(function() {
+    return fetch('/api/v1/section-includes/order', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({school_slug: school, meal_type: meal, sections: names})
+    });
+  }).then(function() { location.reload(); })
+    .catch(function(){ status.textContent = 'Error saving.'; });
+}
+
+// Hover popover
+function siShowPop(name, e) {
+  var school = document.getElementById('si-school').value;
+  var meal = document.getElementById('si-meal').value;
+  var pop = document.getElementById('si-pop');
+  pop.style.display = 'block';
+  pop.innerHTML = '<em style="color:#64748B">Loading today\'s ' + escHtml(name) + '…</em>';
+  siMovePop(e);
+  var key = school + ':' + meal;
+  if (siTodayCache[key]) {
+    siPopFill(pop, name, siTodayCache[key]);
+    return;
   }
-  Promise.all(promises).then(function(results) {
-    var ok = results.every(function(r){ return r.ok || r.status === 204 || r.status === 409; });
-    if (ok) { location.reload(); } else { status.textContent = 'Some saves failed.'; }
-  }).catch(function(){ status.textContent = 'Error saving.'; });
+  fetch('/api/v1/lunch?school=' + encodeURIComponent(school) + '&date=today&meal=' + encodeURIComponent(meal))
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      siTodayCache[key] = data;
+      siPopFill(pop, name, data);
+    }).catch(function(){ pop.innerHTML = '<em style="color:#94A3B8">No data</em>'; });
+}
+
+function siPopFill(pop, name, data) {
+  var secs = data && data.sections ? data.sections : [];
+  var sec = null;
+  for (var i = 0; i < secs.length; i++) {
+    if (secs[i].Name && secs[i].Name.toLowerCase() === name.toLowerCase()) { sec = secs[i]; break; }
+  }
+  if (!sec || !sec.Foods || !sec.Foods.length) {
+    pop.innerHTML = '<strong style="color:#93C5FD">' + escHtml(name) + '</strong><br><em style="color:#64748B">Nothing today</em>';
+    return;
+  }
+  var h = '<strong style="color:#93C5FD">' + escHtml(name) + ' today:</strong><ul style="margin:.3rem 0 0 .9rem;line-height:1.6">';
+  for (var i = 0; i < sec.Foods.length; i++) h += '<li>' + escHtml(sec.Foods[i].Name) + '</li>';
+  pop.innerHTML = h + '</ul>';
+}
+
+function siMovePop(e) {
+  var pop = document.getElementById('si-pop');
+  var x = e.clientX + 14, y = e.clientY - 10;
+  if (x + 250 > window.innerWidth) x = e.clientX - 260;
+  pop.style.left = x + 'px';
+  pop.style.top = y + 'px';
+}
+
+function siHidePop() {
+  document.getElementById('si-pop').style.display = 'none';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function scanMissing() {

@@ -105,6 +105,7 @@ func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Stor
 	s.mux.HandleFunc("/api/v1/favorites", s.handleAPIFavorites)
 	s.mux.HandleFunc("/api/v1/exclusions", s.handleAPIExclusions)
 	s.mux.HandleFunc("/api/v1/section-includes", s.handleAPISectionIncludes)
+	s.mux.HandleFunc("/api/v1/section-includes/order", s.handleAPISectionIncludesOrder)
 	s.mux.HandleFunc("/api/v1/missing-images", s.handleAPIMissingImages)
 	s.mux.HandleFunc("/api/v1/sections", s.handleAPISections)
 	// API Explorer

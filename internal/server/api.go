@@ -106,6 +106,20 @@ func (s *Server) handleAPISectionIncludes(w http.ResponseWriter, r *http.Request
 	}
 	switch r.Method {
 	case http.MethodGet:
+		// ?school=&meal= returns ordered names for that combo; no params returns all rules.
+		school, meal := r.URL.Query().Get("school"), r.URL.Query().Get("meal")
+		if school != "" || meal != "" {
+			names, err := s.store.GetSectionIncludes(school, meal)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if names == nil {
+				names = []string{}
+			}
+			writeJSON(w, names)
+			return
+		}
 		items, err := s.store.ListSectionIncludes()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -186,6 +200,33 @@ func (s *Server) handleAPIExclusions(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// ── /api/v1/section-includes/order ────────────────────────────────────────────
+
+func (s *Server) handleAPISectionIncludesOrder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.store == nil {
+		http.Error(w, "store not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		SchoolSlug string   `json:"school_slug"`
+		MealType   string   `json:"meal_type"`
+		Sections   []string `json:"sections"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Sections) == 0 {
+		http.Error(w, "body must be JSON {school_slug, meal_type, sections:[...]}", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.ReorderSectionIncludes(req.SchoolSlug, req.MealType, req.Sections); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ── /api/v1/sections ──────────────────────────────────────────────────────────
