@@ -4,3 +4,4 @@ dist/
 *.yaml.local
 food.yaml
 menu.yaml
+.DS_Store
