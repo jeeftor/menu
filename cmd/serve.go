@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"menu/internal/auth"
 	"menu/internal/mcpserver"
 	"menu/internal/nutrislice"
 	"menu/internal/server"
@@ -32,7 +33,13 @@ func init() {
 	serveCmd.Flags().Bool("alexa-disable-verification", false, "disable ASK signature verification (local testing only)")
 	serveCmd.Flags().String("alexa-school", nutrislice.DefaultSchools[0].Slug, "default school slug for Alexa queries")
 	serveCmd.Flags().String("alexa-meal", "lunch", "default meal type for Alexa queries: lunch or breakfast")
-	for _, name := range []string{"port", "external-url", "alexa-skill-id", "alexa-disable-verification", "alexa-school", "alexa-meal"} {
+	// OIDC / session settings (optional). When set, enables /login for settings access from WAN.
+	serveCmd.Flags().String("oidc-issuer", "", "OIDC issuer URL (e.g. https://auth.vookie.net/application/o/menu/)")
+	serveCmd.Flags().String("oidc-client-id", "", "OIDC client ID")
+	serveCmd.Flags().String("oidc-client-secret", "", "OIDC client secret")
+	serveCmd.Flags().String("oidc-redirect-url", "", "OIDC callback URL (e.g. https://menu.vookie.net/callback)")
+	serveCmd.Flags().String("session-secret", "", "base64-encoded secret used to sign session cookies (32+ bytes)")
+	for _, name := range []string{"port", "external-url", "alexa-skill-id", "alexa-disable-verification", "alexa-school", "alexa-meal", "oidc-issuer", "oidc-client-id", "oidc-client-secret", "oidc-redirect-url", "session-secret"} {
 		if err := viper.BindPFlag(strings.ReplaceAll(name, "-", "_"), serveCmd.Flags().Lookup(name)); err != nil {
 			panic(err)
 		}
@@ -60,7 +67,24 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	printServeBanner(port, externalURL, alexaCfg != nil)
+	var authCfg *server.AuthConfig
+	if sessionSecret := viper.GetString("session_secret"); sessionSecret != "" {
+		sm, err := auth.NewSessionManager(sessionSecret)
+		if err != nil {
+			return fmt.Errorf("session manager: %w", err)
+		}
+		authCfg = &server.AuthConfig{
+			OIDC: auth.OIDCConfig{
+				Issuer:       viper.GetString("oidc_issuer"),
+				ClientID:     viper.GetString("oidc_client_id"),
+				ClientSecret: viper.GetString("oidc_client_secret"),
+				RedirectURL:  viper.GetString("oidc_redirect_url"),
+			},
+			Sessions: sm,
+		}
+	}
+
+	printServeBanner(port, externalURL, alexaCfg != nil, authCfg != nil)
 
 	client := nutrislice.NewClient(cacheDir)
 	mcpSrv := mcpserver.New(client)
@@ -70,11 +94,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		slog.Warn("could not open store; favorites/exclusions unavailable", "err", err)
 	}
 
-	srv := server.New(client, port, mcpSrv, st, Version, alexaCfg)
+	srv := server.New(client, port, mcpSrv, st, Version, alexaCfg, authCfg)
 	return srv.Start()
 }
 
-func printServeBanner(port int, externalURL string, alexaEnabled bool) {
+func printServeBanner(port int, externalURL string, alexaEnabled, authEnabled bool) {
 	base := fmt.Sprintf("http://localhost:%d", port)
 	if externalURL != "" {
 		base = strings.TrimRight(externalURL, "/")
@@ -96,6 +120,9 @@ func printServeBanner(port int, externalURL string, alexaEnabled bool) {
 	}
 	if alexaEnabled {
 		rows = append(rows, dimStyle.Render("Alexa     ")+urlStyle.Render(base+"/alexa"))
+	}
+	if authEnabled {
+		rows = append(rows, dimStyle.Render("Login     ")+urlStyle.Render(base+"/login"))
 	}
 	rows = append(rows, "", dimStyle.Render("Press Ctrl+C to stop"))
 

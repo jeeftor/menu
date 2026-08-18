@@ -47,6 +47,11 @@ menu serve \
 | `--alexa-disable-verification` | Skip Amazon signature checks. **Local testing only.** |
 | `--alexa-school` | Default school slug (matches `nutrislice.DefaultSchools`). |
 | `--alexa-meal` | `lunch` or `breakfast`. |
+| `--oidc-issuer` | OIDC issuer URL (e.g. `https://auth.vookie.net/application/o/menu/`). |
+| `--oidc-client-id` | OIDC client ID from Authentik. |
+| `--oidc-client-secret` | OIDC client secret from Authentik. |
+| `--oidc-redirect-url` | Callback URL, e.g. `https://menu.vookie.net/callback`. |
+| `--session-secret` | Base64 secret (32+ bytes) used to sign session cookies. |
 
 ## Reverse proxy / auth changes
 
@@ -58,12 +63,20 @@ app-native auth marker:
 # Menu / recipe planner
 @menu host menu.vookie.net
 handle @menu {
-    # auth: app-native (WAN read-only; LAN-only writes via Cf-Connecting-Ip detection)
+    # auth: app-native (WAN read-only; LAN or OIDC writes via Cf-Connecting-Ip detection)
     reverse_proxy http://10.0.0.112:13383 {
         import proxy_headers
     }
 }
 ```
+
+### Access model
+
+- **Reads** (calendar, menus, `/api/v1/lunch/*`, Alexa) are public.
+- **LAN / Tailscale** traffic has full access to settings and config endpoints.
+- **WAN** traffic can optionally log in via Authentik OIDC to manage settings
+  remotely.  Logged-in users see the settings gear and can POST config changes.
+- When OIDC is not configured, settings remain LAN-only from the internet.
 
 ### Cloudflare Access
 
@@ -71,6 +84,27 @@ Create a Self-hosted Access app named `Bypass CF (menu.vookie.net)` covering
 `menu.vookie.net` with a single **Bypass** policy (same pattern as `ai.vookie.net`,
 `searxng.vookie.net`, etc.).  This lets the menu site and Alexa reach the LAN
 without a Cloudflare login; the Go middleware still blocks writes from WAN.
+
+### Authentik OIDC setup
+
+Run the Authentik setup script in the `homelab` repo:
+
+```bash
+ssh root@dockarr 'docker exec authentik-server ak shell -c "$(cat arr/authentik/scripts/16_menu_oidc.py)"'
+```
+
+It prints the **Client ID** and **Client Secret**.  Pass them to `menu serve`:
+
+```bash
+menu serve \
+  --oidc-issuer https://auth.vookie.net/application/o/menu/ \
+  --oidc-client-id <client-id> \
+  --oidc-client-secret <client-secret> \
+  --oidc-redirect-url https://menu.vookie.net/callback \
+  --session-secret <base64-32-byte-secret>
+```
+
+Generate a session secret with: `openssl rand -base64 32`.
 
 ## Alexa Developer Console setup
 
