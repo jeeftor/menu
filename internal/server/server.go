@@ -665,6 +665,7 @@ func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, scho
 		"[[NEXT_MONTH]]", strconv.Itoa(nextM),
 		"[[NEXT_ABBR]]", time.Month(nextM).String()[:3],
 		"[[WEEK_LINK]]", weekLink,
+		"[[TODAY_LINK]]", fmt.Sprintf("/calendar?view=month&year=%d&month=%d&school=%s&meal=%s", time.Now().Year(), int(time.Now().Month()), school.Slug, mealType),
 		"[[SCHOOL_SEL]]", schoolSel,
 		"[[LEGEND]]", legend.String(),
 		"[[ROWS]]", rows.String(),
@@ -918,6 +919,7 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 		"[[SCHOOL_SLUG]]", school.Slug,
 		"[[MEAL]]", mealType,
 		"[[MONTH_LINK]]", monthLink,
+		"[[TODAY_LINK]]", fmt.Sprintf("/calendar?view=week&date=%s&school=%s&meal=%s", time.Now().Format("2006-01-02"), school.Slug, mealType),
 		"[[SCHOOL_SEL]]", schoolSel,
 		"[[COLS]]", cols.String(),
 		"[[ORDER_JSON]]", string(orderJSON),
@@ -966,6 +968,8 @@ const calendarPage = `<!DOCTYPE html>
     .month-nav{display:flex;gap:.5rem;align-items:center}
     .nav-btn{background:#1E293B;border:1px solid #334155;color:#CBD5E1;padding:.4rem .9rem;border-radius:6px;cursor:pointer;font-size:.85rem;text-decoration:none;transition:background .15s;white-space:nowrap}
     .nav-btn:hover{background:#334155;color:#fff}
+    .today-btn{border-color:#3B82F6;color:#93C5FD}
+    .today-btn:hover{background:#1E3A5F;color:#BFDBFE}
     .view-toggle{display:flex;background:#1E293B;border:1px solid #334155;border-radius:6px;overflow:hidden;margin-left:.5rem}
     .view-btn{padding:.4rem .85rem;font-size:.82rem;font-weight:600;text-decoration:none;color:#94A3B8;transition:background .15s;white-space:nowrap}
     .view-btn:hover{background:#334155;color:#fff}
@@ -1039,6 +1043,7 @@ const calendarPage = `<!DOCTYPE html>
   </div>
   <nav class="month-nav">
     <a class="nav-btn" href="/calendar?view=month&year=[[PREV_YEAR]]&month=[[PREV_MONTH]]&school=[[SCHOOL_SLUG]]&meal=[[MEAL]]">&lsaquo; [[PREV_ABBR]]</a>
+    <a class="nav-btn today-btn" href="[[TODAY_LINK]]">Today</a>
     <a class="nav-btn" href="/calendar?view=month&year=[[NEXT_YEAR]]&month=[[NEXT_MONTH]]&school=[[SCHOOL_SLUG]]&meal=[[MEAL]]">[[NEXT_ABBR]] &rsaquo;</a>
     <div class="view-toggle">
       <a class="view-btn active" href="#">Month</a>
@@ -1186,6 +1191,8 @@ const weekPage = `<!DOCTYPE html>
     .hdr-right{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
     .nav-btn{background:#1E293B;border:1px solid #334155;color:#CBD5E1;padding:.4rem .9rem;border-radius:6px;font-size:.85rem;text-decoration:none;transition:background .15s;white-space:nowrap}
     .nav-btn:hover{background:#334155;color:#fff}
+    .today-btn{border-color:#3B82F6;color:#93C5FD}
+    .today-btn:hover{background:#1E3A5F;color:#BFDBFE}
     .view-toggle{display:flex;background:#1E293B;border:1px solid #334155;border-radius:6px;overflow:hidden}
     .view-btn{padding:.4rem .85rem;font-size:.82rem;font-weight:600;text-decoration:none;color:#94A3B8;transition:background .15s}
     .view-btn:hover{background:#334155;color:#fff}
@@ -1228,6 +1235,7 @@ const weekPage = `<!DOCTYPE html>
   </div>
   <div class="hdr-right">
     <a class="nav-btn" href="/calendar?view=week&date=[[PREV_DATE]]&school=[[SCHOOL_SLUG]]&meal=[[MEAL]]">&lsaquo; Prev week</a>
+    <a class="nav-btn today-btn" href="[[TODAY_LINK]]">Today</a>
     <a class="nav-btn" href="/calendar?view=week&date=[[NEXT_DATE]]&school=[[SCHOOL_SLUG]]&meal=[[MEAL]]">Next week &rsaquo;</a>
     <div class="view-toggle">
       <a class="view-btn" href="[[MONTH_LINK]]">Month</a>
