@@ -98,9 +98,16 @@ const apiExplorerPage = `<!DOCTYPE html>
     .tf input:focus,.tf select:focus{border-color:#3B82F6}
     .try-btn{background:#3B82F6;border:none;color:#fff;padding:.3rem .9rem;border-radius:6px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s;align-self:flex-end}
     .try-btn:hover{background:#1D4ED8}
+    .copy-btn{background:#1E293B;border:1px solid #334155;color:#94A3B8;padding:.28rem .6rem;border-radius:5px;font-size:.72rem;cursor:pointer;white-space:nowrap;transition:all .15s;align-self:flex-end;font-family:inherit}
+    .copy-btn:hover{background:#334155;color:#E2E8F0;border-color:#475569}
+    .url-bar{margin-top:.45rem;font-family:"SF Mono",Consolas,monospace;font-size:.68rem;color:#475569;word-break:break-all;display:none}
+    .url-bar.show{display:block}
     .resp{margin-top:.55rem;background:#020617;border:1px solid #334155;border-radius:6px;padding:.6rem .8rem;font-family:"SF Mono",Consolas,monospace;font-size:.7rem;color:#86EFAC;white-space:pre-wrap;word-break:break-all;max-height:260px;overflow-y:auto;display:none}
     .resp.show{display:block}
     .resp.err{color:#FCA5A5}
+    /* Toast */
+    .toast{position:fixed;top:1rem;right:1.25rem;background:#22C55E;color:#fff;font-size:.78rem;font-weight:600;padding:.4rem .9rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:9999}
+    .toast.show{opacity:1}
     /* Section header */
     .sec-hdr{font-size:.95rem;font-weight:700;color:#F1F5F9;margin-bottom:1rem;padding-bottom:.45rem;border-bottom:1px solid #334155}
     /* MCP view */
@@ -112,6 +119,7 @@ const apiExplorerPage = `<!DOCTYPE html>
   </style>
 </head>
 <body>
+<div class="toast" id="toast"></div>
 <header>
   <span class="hdr-logo">&#x1F37D; Menu API Explorer<span class="hdr-ver">v[[VERSION]]</span></span>
   <div class="hdr-nav">
@@ -158,7 +166,10 @@ const apiExplorerPage = `<!DOCTYPE html>
           <div class="try-lbl">Try it</div>
           <div class="try-row">
             <button class="try-btn" onclick="doGet('schools','/api/v1/schools',{})">Send</button>
+            <button class="copy-btn" onclick="copyUrl('/api/v1/schools',{})" title="Copy URL">&#x1F517; URL</button>
+            <button class="copy-btn" onclick="copyCurl('/api/v1/schools',{})" title="Copy curl command">$ curl</button>
           </div>
+          <div class="url-bar" id="u-schools"></div>
           <pre class="resp" id="r-schools"></pre>
         </div>
       </div>
@@ -184,8 +195,11 @@ const apiExplorerPage = `<!DOCTYPE html>
             <div class="tf"><label>date</label><input id="p-lunch-date" value="today" style="width:110px"></div>
             <div class="tf"><label>school</label><select id="p-lunch-school">[[SCHOOL_OPTS]]</select></div>
             <div class="tf"><label>meal</label><select id="p-lunch-meal">[[MEAL_OPTS]]</select></div>
-            <button class="try-btn" onclick="doGet('lunch','/api/v1/lunch',{date:gv('p-lunch-date'),school:gv('p-lunch-school'),meal:gv('p-lunch-meal')})">Send</button>
+            <button class="try-btn" onclick="doGet('lunch','/api/v1/lunch',lunchP())">Send</button>
+            <button class="copy-btn" onclick="copyUrl('/api/v1/lunch',lunchP())" title="Copy URL">&#x1F517; URL</button>
+            <button class="copy-btn" onclick="copyCurl('/api/v1/lunch',lunchP())" title="Copy curl">$ curl</button>
           </div>
+          <div class="url-bar" id="u-lunch"></div>
           <pre class="resp" id="r-lunch"></pre>
         </div>
       </div>
@@ -211,8 +225,11 @@ const apiExplorerPage = `<!DOCTYPE html>
             <div class="tf"><label>date</label><input id="p-sum-date" value="next" style="width:110px"></div>
             <div class="tf"><label>school</label><select id="p-sum-school">[[SCHOOL_OPTS]]</select></div>
             <div class="tf"><label>meal</label><select id="p-sum-meal">[[MEAL_OPTS]]</select></div>
-            <button class="try-btn" onclick="doGet('sum','/api/v1/lunch/summary',{date:gv('p-sum-date'),school:gv('p-sum-school'),meal:gv('p-sum-meal')})">Send</button>
+            <button class="try-btn" onclick="doGet('sum','/api/v1/lunch/summary',sumP())">Send</button>
+            <button class="copy-btn" onclick="copyUrl('/api/v1/lunch/summary',sumP())" title="Copy URL">&#x1F517; URL</button>
+            <button class="copy-btn" onclick="copyCurl('/api/v1/lunch/summary',sumP())" title="Copy curl">$ curl</button>
           </div>
+          <div class="url-bar" id="u-sum"></div>
           <pre class="resp" id="r-sum"></pre>
         </div>
       </div>
@@ -238,8 +255,11 @@ const apiExplorerPage = `<!DOCTYPE html>
             <div class="tf"><label>date</label><input id="p-wk-date" value="today" style="width:110px"></div>
             <div class="tf"><label>school</label><select id="p-wk-school">[[SCHOOL_OPTS]]</select></div>
             <div class="tf"><label>meal</label><select id="p-wk-meal">[[MEAL_OPTS]]</select></div>
-            <button class="try-btn" onclick="doGet('wk','/api/v1/lunch/week',{date:gv('p-wk-date'),school:gv('p-wk-school'),meal:gv('p-wk-meal')})">Send</button>
+            <button class="try-btn" onclick="doGet('wk','/api/v1/lunch/week',wkP())">Send</button>
+            <button class="copy-btn" onclick="copyUrl('/api/v1/lunch/week',wkP())" title="Copy URL">&#x1F517; URL</button>
+            <button class="copy-btn" onclick="copyCurl('/api/v1/lunch/week',wkP())" title="Copy curl">$ curl</button>
           </div>
+          <div class="url-bar" id="u-wk"></div>
           <pre class="resp" id="r-wk"></pre>
         </div>
       </div>
@@ -267,8 +287,11 @@ const apiExplorerPage = `<!DOCTYPE html>
             <div class="tf"><label>month</label><input id="p-mo-month" value="[[MONTH]]" style="width:56px"></div>
             <div class="tf"><label>school</label><select id="p-mo-school">[[SCHOOL_OPTS]]</select></div>
             <div class="tf"><label>meal</label><select id="p-mo-meal">[[MEAL_OPTS]]</select></div>
-            <button class="try-btn" onclick="doGet('mo','/api/v1/lunch/month',{year:gv('p-mo-year'),month:gv('p-mo-month'),school:gv('p-mo-school'),meal:gv('p-mo-meal')})">Send</button>
+            <button class="try-btn" onclick="doGet('mo','/api/v1/lunch/month',moP())">Send</button>
+            <button class="copy-btn" onclick="copyUrl('/api/v1/lunch/month',moP())" title="Copy URL">&#x1F517; URL</button>
+            <button class="copy-btn" onclick="copyCurl('/api/v1/lunch/month',moP())" title="Copy curl">$ curl</button>
           </div>
+          <div class="url-bar" id="u-mo"></div>
           <pre class="resp" id="r-mo"></pre>
         </div>
       </div>
@@ -288,7 +311,10 @@ const apiExplorerPage = `<!DOCTYPE html>
           <div class="try-lbl">GET — list all</div>
           <div class="try-row">
             <button class="try-btn" onclick="doGet('img','/api/v1/food-images',{})">Send</button>
+            <button class="copy-btn" onclick="copyUrl('/api/v1/food-images',{})" title="Copy URL">&#x1F517; URL</button>
+            <button class="copy-btn" onclick="copyCurl('/api/v1/food-images',{})" title="Copy curl">$ curl</button>
           </div>
+          <div class="url-bar" id="u-img"></div>
           <pre class="resp" id="r-img"></pre>
         </div>
       </div>
@@ -306,8 +332,11 @@ const apiExplorerPage = `<!DOCTYPE html>
           <div class="try-lbl">GET — list all</div>
           <div class="try-row">
             <div class="tf"><label>school (optional)</label><select id="p-favs-school">[[SCHOOL_OPTS_ALL]]</select></div>
-            <button class="try-btn" onclick="doGet('favs','/api/v1/favorites',{school:gv('p-favs-school')})">Send</button>
+            <button class="try-btn" onclick="doGet('favs','/api/v1/favorites',favsP())">Send</button>
+            <button class="copy-btn" onclick="copyUrl('/api/v1/favorites',favsP())" title="Copy URL">&#x1F517; URL</button>
+            <button class="copy-btn" onclick="copyCurl('/api/v1/favorites',favsP())" title="Copy curl">$ curl</button>
           </div>
+          <div class="url-bar" id="u-favs"></div>
           <pre class="resp" id="r-favs"></pre>
         </div>
       </div>
@@ -325,7 +354,10 @@ const apiExplorerPage = `<!DOCTYPE html>
           <div class="try-lbl">GET — list all</div>
           <div class="try-row">
             <button class="try-btn" onclick="doGet('excl','/api/v1/exclusions',{})">Send</button>
+            <button class="copy-btn" onclick="copyUrl('/api/v1/exclusions',{})" title="Copy URL">&#x1F517; URL</button>
+            <button class="copy-btn" onclick="copyCurl('/api/v1/exclusions',{})" title="Copy curl">$ curl</button>
           </div>
+          <div class="url-bar" id="u-excl"></div>
           <pre class="resp" id="r-excl"></pre>
         </div>
       </div>
@@ -343,7 +375,10 @@ const apiExplorerPage = `<!DOCTYPE html>
           <div class="try-lbl">GET — list all</div>
           <div class="try-row">
             <button class="try-btn" onclick="doGet('sec','/api/v1/section-includes',{})">Send</button>
+            <button class="copy-btn" onclick="copyUrl('/api/v1/section-includes',{})" title="Copy URL">&#x1F517; URL</button>
+            <button class="copy-btn" onclick="copyCurl('/api/v1/section-includes',{})" title="Copy curl">$ curl</button>
           </div>
+          <div class="url-bar" id="u-sec"></div>
           <pre class="resp" id="r-sec"></pre>
         </div>
       </div>
@@ -363,7 +398,10 @@ const apiExplorerPage = `<!DOCTYPE html>
           <div class="try-lbl">Try it</div>
           <div class="try-row">
             <button class="try-btn" onclick="doGet('missing','/api/v1/missing-images',{})">Send</button>
+            <button class="copy-btn" onclick="copyUrl('/api/v1/missing-images',{})" title="Copy URL">&#x1F517; URL</button>
+            <button class="copy-btn" onclick="copyCurl('/api/v1/missing-images',{})" title="Copy curl">$ curl</button>
           </div>
+          <div class="url-bar" id="u-missing"></div>
           <pre class="resp" id="r-missing"></pre>
         </div>
       </div>
@@ -456,9 +494,27 @@ const apiExplorerPage = `<!DOCTYPE html>
 <script>
 function gv(id) { return document.getElementById(id).value; }
 
+// Param builders — read form fields fresh each call
+function lunchP() { return {date:gv('p-lunch-date'),school:gv('p-lunch-school'),meal:gv('p-lunch-meal')}; }
+function sumP()   { return {date:gv('p-sum-date'),school:gv('p-sum-school'),meal:gv('p-sum-meal')}; }
+function wkP()    { return {date:gv('p-wk-date'),school:gv('p-wk-school'),meal:gv('p-wk-meal')}; }
+function moP()    { return {year:gv('p-mo-year'),month:gv('p-mo-month'),school:gv('p-mo-school'),meal:gv('p-mo-meal')}; }
+function favsP()  { return {school:gv('p-favs-school')}; }
+
+function buildUrl(path, params) {
+  var parts = [];
+  for (var k in params) {
+    var v = params[k];
+    if (v !== '' && v !== null && v !== undefined) {
+      parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(v));
+    }
+  }
+  return path + (parts.length ? '?' + parts.join('&') : '');
+}
+
 function showView(name) {
   document.getElementById('view-rest').style.display = name === 'rest' ? 'flex' : 'none';
-  document.getElementById('view-mcp').style.display = name === 'mcp' ? 'flex' : 'none';
+  document.getElementById('view-mcp').style.display  = name === 'mcp'  ? 'flex' : 'none';
   var btns = document.querySelectorAll('.tab-btn');
   for (var i = 0; i < btns.length; i++) {
     var t = btns[i].textContent.trim().toLowerCase();
@@ -468,15 +524,10 @@ function showView(name) {
 }
 
 function doGet(id, path, params) {
-  var parts = [];
-  for (var k in params) {
-    var v = params[k];
-    if (v !== '' && v !== null && v !== undefined) {
-      parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(v));
-    }
-  }
-  var url = path + (parts.length ? '?' + parts.join('&') : '');
+  var url = buildUrl(path, params);
   var el = document.getElementById('r-' + id);
+  var ub = document.getElementById('u-' + id);
+  if (ub) { ub.textContent = window.location.origin + url; ub.className = 'url-bar show'; }
   el.className = 'resp show';
   el.textContent = 'Loading...';
   fetch(url).then(function(r) {
@@ -489,6 +540,32 @@ function doGet(id, path, params) {
     el.className = 'resp show err';
     el.textContent = 'Error: ' + e.message;
   });
+}
+
+function copyUrl(path, params) {
+  var url = window.location.origin + buildUrl(path, params);
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(function() { flash('URL copied!'); });
+  } else {
+    prompt('Copy this URL:', url);
+  }
+}
+
+function copyCurl(path, params) {
+  var url = window.location.origin + buildUrl(path, params);
+  var cmd = "curl '" + url + "'";
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(cmd).then(function() { flash('curl copied!'); });
+  } else {
+    prompt('Copy this curl command:', cmd);
+  }
+}
+
+function flash(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function() { t.classList.remove('show'); }, 1800);
 }
 </script>
 </body>
