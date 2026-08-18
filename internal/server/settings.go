@@ -13,26 +13,23 @@ import (
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	var imgsHTML, favsHTML, exsHTML, secIncHTML string
+	var imgsHTML, favsHTML, exsHTML string
 	if s.store == nil {
 		msg := `<p class="warn">Settings require the server to be started with <code>--data-dir</code>.</p>`
-		imgsHTML, favsHTML, exsHTML, secIncHTML = msg, msg, msg, msg
+		imgsHTML, favsHTML, exsHTML = msg, msg, msg
 	} else {
 		imgs, _ := s.store.ListFoodImages()
 		favs, _ := s.store.ListFavorites("")
 		exs, _ := s.store.ListExclusions()
-		sis, _ := s.store.ListSectionIncludes()
 		imgsHTML = buildImagesTable(imgs)
 		favsHTML = buildFavoritesTable(favs)
 		exsHTML = buildExclusionsTable(exs)
-		secIncHTML = buildSectionIncludesTable(sis)
 	}
 
 	repl := strings.NewReplacer(
 		"[[IMAGES_TABLE]]", imgsHTML,
 		"[[FAVORITES_TABLE]]", favsHTML,
 		"[[EXCLUSIONS_TABLE]]", exsHTML,
-		"[[SECTION_INCLUDES_TABLE]]", secIncHTML,
 		"[[SCHOOL_OPTIONS]]", buildSchoolOptions(),
 	)
 	fmt.Fprint(w, repl.Replace(settingsPage))
@@ -107,33 +104,6 @@ func buildExclusionsTable(exs []store.Exclusion) string {
 	return sb.String()
 }
 
-func buildSectionIncludesTable(sis []store.SectionInclude) string {
-	if len(sis) == 0 {
-		return `<p class="empty">No section include rules. All option sections are shown.</p>`
-	}
-	var sb strings.Builder
-	sb.WriteString(`<table class="data-table"><thead><tr><th>Section</th><th>School</th><th>Meal</th><th></th></tr></thead><tbody>`)
-	for _, si := range sis {
-		school := si.SchoolSlug
-		if school == "" {
-			school = "All schools"
-		}
-		meal := si.MealType
-		if meal == "" {
-			meal = "All meals"
-		}
-		sb.WriteString(fmt.Sprintf(
-			`<tr><td><code>%s</code></td><td>%s</td><td>%s</td>`+
-				`<td><button class="del-btn" data-id="%d" onclick="delSecInc(this)">Delete</button></td></tr>`,
-			html.EscapeString(si.SectionName),
-			html.EscapeString(school),
-			html.EscapeString(meal),
-			si.ID,
-		))
-	}
-	sb.WriteString(`</tbody></table>`)
-	return sb.String()
-}
 
 func buildSchoolOptions() string {
 	var sb strings.Builder
@@ -202,11 +172,10 @@ const settingsPage = `<!DOCTYPE html>
     .si-chip-del{background:none;border:none;color:#64748B;font-size:.8rem;cursor:pointer;padding:0 .1rem;line-height:1}
     .si-chip-del:hover{color:#EF4444}
     .si-pop{position:fixed;z-index:9999;background:#1E293B;border:1px solid #334155;border-radius:10px;padding:.7rem .9rem;max-width:240px;font-size:.75rem;color:#E2E8F0;box-shadow:0 8px 24px rgba(0,0,0,.3);pointer-events:none}
-    .si-grid{display:grid;grid-template-columns:3.5rem auto auto;gap:.35rem .5rem;align-items:center}
-    .si-row-lbl{font-size:.75rem;font-weight:700;color:#64748B;text-align:right;padding-right:.35rem;white-space:nowrap}
-    .si-tab{font-size:.78rem;padding:.28rem .85rem;border-radius:20px;border:1px solid #CBD5E1;background:#fff;cursor:pointer;transition:all .15s;color:#475569;white-space:nowrap;font-family:inherit}
-    .si-tab:hover{border-color:#3B82F6;color:#3B82F6}
-    .si-tab.active{background:#3B82F6;border-color:#3B82F6;color:#fff}
+    .si-tabs{display:flex;flex-wrap:wrap;gap:.4rem;padding-bottom:.75rem;border-bottom:2px solid #E2E8F0}
+    .si-tab{font-size:.82rem;padding:.4rem 1.1rem;border-radius:8px;border:1px solid #E2E8F0;background:#F8FAFC;cursor:pointer;transition:all .15s;color:#475569;font-family:inherit;font-weight:500}
+    .si-tab:hover{border-color:#3B82F6;color:#3B82F6;background:#EFF6FF}
+    .si-tab.active{background:#3B82F6;border-color:#3B82F6;color:#fff;font-weight:600}
     @media(max-width:640px){
       header{padding:.75rem 1rem}
       header h1{font-size:1.05rem}
@@ -301,35 +270,30 @@ const settingsPage = `<!DOCTYPE html>
   <div class="card">
     <div class="card-hdr">
       <h2>Section Include Rules</h2>
-      <p>Control which sections appear and in what order. Pick a school and meal — select sections, then drag chips to reorder. Hover a chip to preview today's items.</p>
+      <p>Control which sections appear and in what order. Select a view, toggle sections, then drag chips to reorder. Hover a chip to preview today's items.</p>
     </div>
     <div class="card-body">
-      [[SECTION_INCLUDES_TABLE]]
-      <div style="display:flex;flex-direction:column;gap:.8rem">
-        <div class="si-grid">
-          <div class="si-row-lbl">WRES</div>
-          <button class="si-tab" data-school="woodmen-roberts-elementary-school" data-meal="breakfast" onclick="siPickTab(this)">Breakfast</button>
-          <button class="si-tab" data-school="woodmen-roberts-elementary-school" data-meal="lunch" onclick="siPickTab(this)">Lunch</button>
-          <div class="si-row-lbl">EMS</div>
-          <button class="si-tab" data-school="eagleview-middle-school" data-meal="breakfast" onclick="siPickTab(this)">Breakfast</button>
-          <button class="si-tab" data-school="eagleview-middle-school" data-meal="lunch" onclick="siPickTab(this)">Lunch</button>
-        </div>
-        <div id="si-panel" style="display:none;flex-direction:column;gap:.65rem">
-          <div>
-            <div class="si-sub-lbl">Available sections — click to toggle:</div>
-            <div id="si-avail" style="display:flex;flex-wrap:wrap;gap:.35rem .5rem;margin-top:.35rem"></div>
-          </div>
-          <div>
-            <div class="si-sub-lbl">Included order — drag to reorder:</div>
-            <div id="si-chips" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem;min-height:2.2rem;padding:.3rem;background:#F8FAFC;border:1px dashed #CBD5E1;border-radius:8px"></div>
-          </div>
-          <div style="display:flex;align-items:center;gap:.75rem">
-            <button class="add-btn" onclick="siSave()">Save Order</button>
-            <span id="si-status" style="font-size:.8rem;color:#64748B"></span>
-          </div>
-        </div>
-        <div id="si-empty" style="font-size:.82rem;color:#94A3B8;font-style:italic;display:none">No cached data found. Visit the calendar for this school first to populate the cache.</div>
+      <div class="si-tabs">
+        <button class="si-tab" data-school="woodmen-roberts-elementary-school" data-meal="breakfast" onclick="siPickTab(this)">WRES Breakfast</button>
+        <button class="si-tab" data-school="woodmen-roberts-elementary-school" data-meal="lunch" onclick="siPickTab(this)">WRES Lunch</button>
+        <button class="si-tab" data-school="eagleview-middle-school" data-meal="breakfast" onclick="siPickTab(this)">EMS Breakfast</button>
+        <button class="si-tab" data-school="eagleview-middle-school" data-meal="lunch" onclick="siPickTab(this)">EMS Lunch</button>
       </div>
+      <div id="si-panel" style="display:none;flex-direction:column;gap:.65rem">
+        <div>
+          <div class="si-sub-lbl">Available sections — click to toggle:</div>
+          <div id="si-avail" style="display:flex;flex-wrap:wrap;gap:.35rem .5rem;margin-top:.35rem"></div>
+        </div>
+        <div>
+          <div class="si-sub-lbl">Included order — drag to reorder:</div>
+          <div id="si-chips" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem;min-height:2.2rem;padding:.3rem;background:#F8FAFC;border:1px dashed #CBD5E1;border-radius:8px"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.75rem">
+          <button class="add-btn" onclick="siSave()">Save</button>
+          <span id="si-status" style="font-size:.8rem;color:#64748B"></span>
+        </div>
+      </div>
+      <div id="si-empty" style="font-size:.82rem;color:#94A3B8;font-style:italic;display:none">No cached data found. Visit the calendar for this school first to populate the cache.</div>
       <div id="si-pop" class="si-pop" style="display:none"></div>
     </div>
   </div>
@@ -362,10 +326,6 @@ function delFav(btn) {
 }
 function delExclusion(btn) {
   fetch('/api/v1/exclusions?id=' + btn.dataset.id, {method:'DELETE'})
-    .then(function(r){ if(r.ok||r.status===204) location.reload(); else alert('Error: '+r.status); });
-}
-function delSecInc(btn) {
-  fetch('/api/v1/section-includes?id=' + btn.dataset.id, {method:'DELETE'})
     .then(function(r){ if(r.ok||r.status===204) location.reload(); else alert('Error: '+r.status); });
 }
 
@@ -425,6 +385,7 @@ var siTodayCache = {};
 var siDragSrc = null;
 var siCurSchool = '';
 var siCurMeal = '';
+var siOrigIncluded = [];
 
 function siPickTab(btn) {
   document.querySelectorAll('.si-tab').forEach(function(t){ t.classList.remove('active'); });
@@ -451,6 +412,7 @@ function siLoad() {
     var all = results[0] || [];
     var included = results[1] || [];
     if (!all.length) { empty.style.display = 'block'; return; }
+    siOrigIncluded = included.slice();
     siRenderAvail(all, included);
     siRenderChips(included);
     panel.style.display = 'flex';
@@ -544,27 +506,52 @@ function siSave() {
   var meal = siCurMeal;
   var chips = document.getElementById('si-chips').querySelectorAll('.si-chip');
   var status = document.getElementById('si-status');
-  if (!chips.length) { status.textContent = 'No sections selected.'; return; }
   var names = [];
   for (var i = 0; i < chips.length; i++) names.push(chips[i].getAttribute('data-sec'));
   status.textContent = 'Saving…';
-  // POST any newly-added sections (existing ones ignored via INSERT OR IGNORE),
-  // then reorder all of them by position in one PUT call.
-  var seq = Promise.resolve();
-  names.forEach(function(name) {
-    seq = seq.then(function() {
-      return fetch('/api/v1/section-includes', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({section_name: name, school_slug: school, meal_type: meal})
+
+  // Determine which sections were removed since load
+  var nameSet = {};
+  names.forEach(function(n){ nameSet[n] = true; });
+  var removed = siOrigIncluded.filter(function(n){ return !nameSet[n]; });
+
+  // First fetch existing DB rows to get IDs for removed sections
+  fetch('/api/v1/section-includes')
+    .then(function(r){ return r.json(); })
+    .then(function(all) {
+      // Delete removed sections
+      var delSeq = Promise.resolve();
+      all.forEach(function(row) {
+        if (row.school_slug === school && row.meal_type === meal &&
+            removed.indexOf(row.section_name) !== -1) {
+          delSeq = delSeq.then(function() {
+            return fetch('/api/v1/section-includes?id=' + row.id, {method:'DELETE'});
+          });
+        }
       });
-    });
-  });
-  seq.then(function() {
-    return fetch('/api/v1/section-includes/order', {
-      method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({school_slug: school, meal_type: meal, sections: names})
-    });
-  }).then(function() { location.reload(); })
+      return delSeq;
+    })
+    .then(function() {
+      // POST any newly-added sections (INSERT OR IGNORE for existing)
+      var addSeq = Promise.resolve();
+      names.forEach(function(name) {
+        addSeq = addSeq.then(function() {
+          return fetch('/api/v1/section-includes', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({section_name: name, school_slug: school, meal_type: meal})
+          });
+        });
+      });
+      return addSeq;
+    })
+    .then(function() {
+      if (!names.length) { location.reload(); return; }
+      return fetch('/api/v1/section-includes/order', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({school_slug: school, meal_type: meal, sections: names})
+      });
+    })
+    .then(function() { location.reload(); })
     .catch(function(){ status.textContent = 'Error saving.'; });
 }
 
