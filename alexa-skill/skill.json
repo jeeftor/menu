@@ -3,13 +3,21 @@
     "publishingInformation": {
       "locales": {
         "en-US": {
-          "summary": "School lunch menu for the kids",
+          "summary": "Ask what's on the school lunch menu for any day of the week.",
           "examplePhrases": [
             "Alexa, open School Lunch",
-            "Alexa, ask School Lunch what's for lunch tomorrow"
+            "Alexa, ask School Lunch what's for lunch tomorrow",
+            "Alexa, ask School Lunch what is for lunch at school today"
+          ],
+          "keywords": [
+            "school lunch",
+            "menu",
+            "cafeteria",
+            "kids",
+            "food"
           ],
           "name": "School Lunch",
-          "description": "Ask what's on the school lunch menu today, tomorrow, or any day of the week."
+          "description": "Quickly check the school lunch menu for any day. Just ask, \"Alexa, ask School Lunch what's for lunch tomorrow\" or \"Alexa, ask School Lunch what's on the menu for Monday.\""
         }
       },
       "category": "KIDS",
@@ -21,6 +29,14 @@
         "endpoint": {
           "uri": "https://menu.vookie.net/alexa",
           "sslCertificateType": "Trusted"
+        }
+      }
+    },
+    "privacyAndCompliance": {
+      "locales": {
+        "en-US": {
+          "privacyPolicyUrl": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/PRIVACY.md",
+          "termsOfUseUrl": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/TERMS.md"
         }
       }
     },
