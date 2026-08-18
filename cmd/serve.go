@@ -28,11 +28,14 @@ func init() {
 	serveCmd.Flags().Int("port", 8080, "port to listen on")
 	serveCmd.Flags().String("data-dir", "", "directory for SQLite database (default: ~/.config/menu)")
 	serveCmd.Flags().String("external-url", "", "public base URL shown in the startup banner (e.g. http://homelab:8080)")
-	if err := viper.BindPFlag("port", serveCmd.Flags().Lookup("port")); err != nil {
-		panic(err)
-	}
-	if err := viper.BindPFlag("external_url", serveCmd.Flags().Lookup("external-url")); err != nil {
-		panic(err)
+	serveCmd.Flags().String("alexa-skill-id", "", "Alexa skill application ID (enables /alexa endpoint)")
+	serveCmd.Flags().Bool("alexa-disable-verification", false, "disable ASK signature verification (local testing only)")
+	serveCmd.Flags().String("alexa-school", nutrislice.DefaultSchools[0].Slug, "default school slug for Alexa queries")
+	serveCmd.Flags().String("alexa-meal", "lunch", "default meal type for Alexa queries: lunch or breakfast")
+	for _, name := range []string{"port", "external-url", "alexa-skill-id", "alexa-disable-verification", "alexa-school", "alexa-meal"} {
+		if err := viper.BindPFlag(strings.ReplaceAll(name, "-", "_"), serveCmd.Flags().Lookup(name)); err != nil {
+			panic(err)
+		}
 	}
 	rootCmd.AddCommand(serveCmd)
 }
@@ -47,7 +50,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dataDir = filepath.Join(home, ".config", "menu")
 	}
 
-	printServeBanner(port, externalURL)
+	var alexaCfg *server.AlexaConfig
+	if skillID := viper.GetString("alexa_skill_id"); skillID != "" {
+		alexaCfg = &server.AlexaConfig{
+			ApplicationID:  skillID,
+			VerifyRequests: !viper.GetBool("alexa_disable_verification"),
+			DefaultSchool:  viper.GetString("alexa_school"),
+			DefaultMeal:    viper.GetString("alexa_meal"),
+		}
+	}
+
+	printServeBanner(port, externalURL, alexaCfg != nil)
 
 	client := nutrislice.NewClient(cacheDir)
 	mcpSrv := mcpserver.New(client)
@@ -57,11 +70,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		slog.Warn("could not open store; favorites/exclusions unavailable", "err", err)
 	}
 
-	srv := server.New(client, port, mcpSrv, st, Version)
+	srv := server.New(client, port, mcpSrv, st, Version, alexaCfg)
 	return srv.Start()
 }
 
-func printServeBanner(port int, externalURL string) {
+func printServeBanner(port int, externalURL string, alexaEnabled bool) {
 	base := fmt.Sprintf("http://localhost:%d", port)
 	if externalURL != "" {
 		base = strings.TrimRight(externalURL, "/")
@@ -72,22 +85,24 @@ func printServeBanner(port int, externalURL string) {
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8"))
 	verStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
 
+	rows := []string{
+		titleStyle.Render("🍽️  Menu — School Lunch Calendar") + " " + verStyle.Render("v"+Version),
+		"",
+		dimStyle.Render("Calendar  ") + urlStyle.Render(base+"/"),
+		dimStyle.Render("API Docs  ") + urlStyle.Render(base+"/api"),
+		dimStyle.Render("Settings  ") + urlStyle.Render(base+"/settings"),
+		dimStyle.Render("MCP HTTP  ") + urlStyle.Render(base+"/mcp"),
+		dimStyle.Render("MCP stdio ") + urlStyle.Render("menu mcp"),
+	}
+	if alexaEnabled {
+		rows = append(rows, dimStyle.Render("Alexa     ")+urlStyle.Render(base+"/alexa"))
+	}
+	rows = append(rows, "", dimStyle.Render("Press Ctrl+C to stop"))
+
 	banner := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#334155")).
 		Padding(0, 2).
-		Render(
-			lipgloss.JoinVertical(lipgloss.Left,
-				titleStyle.Render("🍽️  Menu — School Lunch Calendar")+" "+verStyle.Render("v"+Version),
-				"",
-				dimStyle.Render("Calendar  ")+urlStyle.Render(base+"/"),
-				dimStyle.Render("API Docs  ")+urlStyle.Render(base+"/api"),
-				dimStyle.Render("Settings  ")+urlStyle.Render(base+"/settings"),
-				dimStyle.Render("MCP HTTP  ")+urlStyle.Render(base+"/mcp"),
-				dimStyle.Render("MCP stdio ")+urlStyle.Render("menu mcp"),
-				"",
-				dimStyle.Render("Press Ctrl+C to stop"),
-			),
-		)
+		Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
 	fmt.Println(banner)
 }

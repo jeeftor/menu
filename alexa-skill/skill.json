@@ -1,0 +1,30 @@
+{
+  "skillManifest": {
+    "publishingInformation": {
+      "locales": {
+        "en-US": {
+          "summary": "School lunch menu for the kids",
+          "examplePhrases": [
+            "Alexa, open Menu",
+            "Alexa, ask Menu what's for lunch tomorrow"
+          ],
+          "name": "Menu",
+          "description": "Ask what's on the school lunch menu today, tomorrow, or any day of the week."
+        }
+      },
+      "category": "KIDS",
+      "isAvailableWorldwide": false,
+      "distributionCountries": ["US"]
+    },
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "https://menu.vookie.net/alexa",
+          "sslCertificateType": "Trusted"
+        }
+      }
+    },
+    "permissions": [],
+    "manifestVersion": "1.0"
+  }
+}

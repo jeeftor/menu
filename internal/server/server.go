@@ -81,16 +81,25 @@ var modalSectionOrder = []string{
 
 // Server is the school lunch HTTP server.
 type Server struct {
-	client    *nutrislice.Client
-	port      int
-	version   string
-	mux       *http.ServeMux
-	mcpServer *mcp.Server
-	store     *store.Store
+	client       *nutrislice.Client
+	port         int
+	version      string
+	mux          *http.ServeMux
+	mcpServer    *mcp.Server
+	store        *store.Store
+	alexaHandler http.Handler
+}
+
+// AlexaConfig holds settings for the /alexa endpoint. Nil disables it.
+type AlexaConfig struct {
+	ApplicationID  string
+	VerifyRequests bool
+	DefaultSchool  string
+	DefaultMeal    string
 }
 
 // New creates a Server bound to the given port. st may be nil if no persistence is needed.
-func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Store, version string) *Server {
+func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Store, version string, alexaCfg *AlexaConfig) *Server {
 	s := &Server{client: client, port: port, version: version, mux: http.NewServeMux(), mcpServer: mcpSrv, store: st}
 	s.mux.HandleFunc("/", s.handleRoot)
 	s.mux.HandleFunc("/calendar", s.handleCalendar)
@@ -108,6 +117,11 @@ func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Stor
 	s.mux.HandleFunc("/api/v1/section-includes/order", s.handleAPISectionIncludesOrder)
 	s.mux.HandleFunc("/api/v1/missing-images", s.handleAPIMissingImages)
 	s.mux.HandleFunc("/api/v1/sections", s.handleAPISections)
+	// Alexa skill endpoint
+	if alexaCfg != nil {
+		s.alexaHandler = newAlexaHandler(s, alexaCfg)
+		s.mux.HandleFunc("/alexa", s.handleAlexa)
+	}
 	// API Explorer
 	s.mux.HandleFunc("/api", s.handleAPIExplorer)
 	// MCP — Streamable HTTP transport
@@ -452,18 +466,19 @@ func (s *Server) handleAPILunchMonth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleAPISummary(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	school := nutrislice.FindSchool(q.Get("school"))
+// ResolveSummary returns a voice-friendly menu summary for the given school,
+// meal type, and date parameter. Supported dateParams: "today", "tomorrow",
+// "next", weekdays, and ISO dates (YYYY-MM-DD).
+func (s *Server) ResolveSummary(schoolSlug, mealType, dateParam string) (menu.Summary, error) {
+	school := nutrislice.FindSchool(schoolSlug)
 	if school == nil {
 		school = &nutrislice.DefaultSchools[0]
 	}
-	mealType := q.Get("meal")
 	if mealType == "" {
 		mealType = "lunch"
 	}
 
-	dateParam := strings.ToLower(strings.TrimSpace(q.Get("date")))
+	dateParam = strings.ToLower(strings.TrimSpace(dateParam))
 	if dateParam == "" {
 		dateParam = "today"
 	}
@@ -477,17 +492,25 @@ func (s *Server) handleAPISummary(w http.ResponseWriter, r *http.Request) {
 	} else {
 		d, parseErr := parseQueryDate(dateParam)
 		if parseErr != nil {
-			http.Error(w, parseErr.Error(), http.StatusBadRequest)
-			return
+			return menu.Summary{}, parseErr
 		}
 		day, err = s.fetchDay(*school, d, mealType)
 	}
 	if err != nil {
+		return menu.Summary{}, err
+	}
+
+	return menu.BuildSummary(day, school.Name, s.exclusions(school.Slug), s.sectionIncludes(school.Slug, mealType)), nil
+}
+
+func (s *Server) handleAPISummary(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	summary, err := s.ResolveSummary(q.Get("school"), q.Get("meal"), q.Get("date"))
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	writeJSON(w, menu.BuildSummary(day, school.Name, s.exclusions(school.Slug), s.sectionIncludes(school.Slug, mealType)))
+	writeJSON(w, summary)
 }
 
 // findNextMenuDay searches forward from tomorrow for the next school day that

@@ -1,0 +1,51 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "menu",
+      "intents": [
+        {
+          "name": "MenuQueryIntent",
+          "slots": [
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "samples": [
+                "{date}"
+              ]
+            }
+          ],
+          "samples": [
+            "what's for lunch",
+            "what's for lunch {date}",
+            "what's on the menu",
+            "what's on the menu for {date}",
+            "what are they serving",
+            "what are they serving {date}",
+            "what is lunch {date}",
+            "what is for lunch {date}",
+            "what's for lunch at school",
+            "what's for lunch at school {date}",
+            "what's the lunch menu {date}"
+          ]
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        }
+      ],
+      "types": []
+    }
+  }
+}
