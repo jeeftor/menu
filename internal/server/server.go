@@ -92,6 +92,8 @@ type Server struct {
 	alexaHandler http.Handler
 	oidc         *auth.OIDCProvider
 	sessions     *auth.SessionManager
+	limiter      *rateLimiter
+	authLimiter  *rateLimiter
 }
 
 // AlexaConfig holds settings for the /alexa endpoint. Nil disables it.
@@ -110,7 +112,16 @@ type AuthConfig struct {
 
 // New creates a Server bound to the given port. st may be nil if no persistence is needed.
 func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Store, version string, alexaCfg *AlexaConfig, authCfg *AuthConfig) *Server {
-	s := &Server{client: client, port: port, version: version, mux: http.NewServeMux(), mcpServer: mcpSrv, store: st}
+	s := &Server{
+		client:      client,
+		port:        port,
+		version:     version,
+		mux:         http.NewServeMux(),
+		mcpServer:   mcpSrv,
+		store:       st,
+		limiter:     newRateLimiter(time.Minute/60, 60), // 60 req/min per IP
+		authLimiter: newRateLimiter(time.Minute/10, 10), // 10 req/min per IP
+	}
 	if authCfg != nil {
 		s.oidc = mustInitOIDC(authCfg.OIDC, authCfg.Sessions)
 		s.sessions = authCfg.Sessions
@@ -132,16 +143,16 @@ func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Stor
 	s.mux.HandleFunc("/api/v1/section-includes", s.requireLANOrAuthForWrites(s.handleAPISectionIncludes))
 	s.mux.HandleFunc("/api/v1/section-includes/order", s.requireLANOrAuthForWrites(s.handleAPISectionIncludesOrder))
 	s.mux.HandleFunc("/api/v1/missing-images", s.requireLANOrAuthForWrites(s.handleAPIMissingImages))
-	// OIDC login flow
+	// OIDC login flow — stricter rate limits
 	if s.oidc != nil && s.oidc.Enabled() {
-		s.mux.HandleFunc("/login", s.oidc.LoginHandler)
-		s.mux.HandleFunc("/callback", s.oidc.CallbackHandler)
-		s.mux.HandleFunc("/logout", s.oidc.LogoutHandler)
+		s.mux.HandleFunc("/login", s.strictRateLimitMiddleware(http.HandlerFunc(s.oidc.LoginHandler)).ServeHTTP)
+		s.mux.HandleFunc("/callback", s.strictRateLimitMiddleware(http.HandlerFunc(s.oidc.CallbackHandler)).ServeHTTP)
+		s.mux.HandleFunc("/logout", s.strictRateLimitMiddleware(http.HandlerFunc(s.oidc.LogoutHandler)).ServeHTTP)
 	}
-	// Alexa skill endpoint
+	// Alexa skill endpoint — stricter rate limits
 	if alexaCfg != nil {
 		s.alexaHandler = newAlexaHandler(s, alexaCfg)
-		s.mux.HandleFunc("/alexa", s.handleAlexa)
+		s.mux.HandleFunc("/alexa", s.strictRateLimitMiddleware(http.HandlerFunc(s.handleAlexa)).ServeHTTP)
 	}
 	// API Explorer
 	s.mux.HandleFunc("/api", s.handleAPIExplorer)
@@ -166,32 +177,16 @@ func mustInitOIDC(cfg auth.OIDCConfig, sm *auth.SessionManager) *auth.OIDCProvid
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	slog.Info("server listening", "addr", "http://localhost"+addr)
-	return http.ListenAndServe(addr, s.logMiddleware(s.mux))
-}
-
-// logMiddleware logs each HTTP request with method, path, status and duration.
-func (s *Server) logMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
-		slog.Info("request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rec.status,
-			"duration", time.Since(start).String(),
-		)
-	})
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (rec *statusRecorder) WriteHeader(code int) {
-	rec.status = code
-	rec.ResponseWriter.WriteHeader(code)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           s.logMiddleware(s.securityHeadersMiddleware(s.rateLimitMiddleware(s.mux))),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MB
+	}
+	return srv.ListenAndServe()
 }
 
 // isWAN returns true when the request arrived via the Cloudflare tunnel.
@@ -475,15 +470,15 @@ func (s *Server) handleAPILunch(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if !ok {
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"date": key, "school": school.Name,
 			"note": "no menu found — holiday or non-school day",
-		})
+		}) // #nosec G104 -- best-effort response write
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"date": key, "school": school.Name, "sections": day.Sections,
-	})
+	}) // #nosec G104 -- best-effort response write
 }
 
 // ── REST API handlers ────────────────────────────────────────────────────────
@@ -720,7 +715,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	enc.Encode(v) //nolint:errcheck
+	_ = enc.Encode(v) // #nosec G104 -- best-effort response write; cannot recover from client disconnect
 }
 
 // ── HTML calendar ────────────────────────────────────────────────────────────
@@ -868,7 +863,7 @@ func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, scho
 			return "false"
 		}(),
 	)
-	fmt.Fprint(w, repl.Replace(calendarPage))
+	_, _ = fmt.Fprint(w, repl.Replace(calendarPage)) // #nosec G104 G705 -- strings.Replacer.Replace never errors; dynamic JSON is HTML-escaped by encoding/json; authLink is explicitly escaped
 }
 
 // buildSchoolSelector generates the school+meal tab bar HTML.
@@ -1170,7 +1165,7 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 			return "false"
 		}(),
 	)
-	fmt.Fprint(w, repl.Replace(weekPage))
+	_, _ = fmt.Fprint(w, repl.Replace(weekPage)) // #nosec G104 G705 -- strings.Replacer.Replace never errors; dynamic JSON is HTML-escaped by encoding/json; authLink is explicitly escaped
 }
 
 func sortedSections(sections []menu.Section) []menu.Section {

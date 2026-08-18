@@ -40,7 +40,7 @@ func (c *Client) FetchWeek(school School, d time.Time, mealType string) (*WeekRe
 	cacheKey := fmt.Sprintf("%s_%s_%s_%s.json", school.District, school.Slug, mealType, monday.Format("2006-01-02"))
 	cachePath := filepath.Join(c.CacheDir, cacheKey)
 
-	if data, err := os.ReadFile(cachePath); err == nil {
+	if data, err := os.ReadFile(cachePath); err == nil { // #nosec G304 -- cachePath is constructed internally from a fixed cache directory and a sanitized date hash
 		var resp WeekResponse
 		if err := json.Unmarshal(data, &resp); err == nil {
 			slog.Debug("cache hit", "key", cacheKey)
@@ -81,8 +81,8 @@ func (c *Client) FetchWeek(school School, d time.Time, mealType string) (*WeekRe
 	}
 
 	// Cache to disk (best-effort)
-	if err := os.MkdirAll(c.CacheDir, 0o755); err == nil {
-		if err := os.WriteFile(cachePath, body, 0o644); err != nil {
+	if err := os.MkdirAll(c.CacheDir, 0o750); err == nil {
+		if err := os.WriteFile(cachePath, body, 0o600); err != nil {
 			slog.Warn("could not cache response", "path", cachePath, "err", err)
 		}
 	}

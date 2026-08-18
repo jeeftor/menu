@@ -52,7 +52,7 @@ type SectionInclude struct {
 
 // Open opens (or creates) the SQLite database at path and runs migrations.
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("creating data dir: %w", err)
 	}
 	db, err := sql.Open("sqlite", path+"?_journal=WAL&_timeout=5000")
@@ -62,7 +62,7 @@ func Open(path string) (*Store, error) {
 	db.SetMaxOpenConns(1) // SQLite is single-writer
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
-		db.Close()
+		_ = db.Close() // #nosec G104 -- cleanup in error path; cannot recover from close failure
 		return nil, err
 	}
 	return s, nil
@@ -204,10 +204,12 @@ func (s *Store) ListFavorites(schoolSlug string) ([]Favorite, error) {
 // IsFavorite reports whether the food is favorited for the given school (or globally).
 func (s *Store) IsFavorite(foodName, schoolSlug string) bool {
 	var n int
-	s.db.QueryRow(
+	if err := s.db.QueryRow(
 		`SELECT COUNT(*) FROM favorites WHERE food_name = ? AND (school_slug = '' OR school_slug = ?)`,
 		normalize(foodName), schoolSlug,
-	).Scan(&n)
+	).Scan(&n); err != nil {
+		return false
+	}
 	return n > 0
 }
 
@@ -311,10 +313,12 @@ func (s *Store) AddSectionInclude(schoolSlug, mealType, sectionName string) erro
 	meal := strings.ToLower(strings.TrimSpace(mealType))
 	name := strings.TrimSpace(sectionName)
 	var maxPos int
-	s.db.QueryRow(
+	if err := s.db.QueryRow(
 		`SELECT COALESCE(MAX(position)+1, 0) FROM section_includes WHERE school_slug = ? AND meal_type = ?`,
 		schoolSlug, meal,
-	).Scan(&maxPos)
+	).Scan(&maxPos); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(
 		`INSERT OR IGNORE INTO section_includes(school_slug, meal_type, section_name, position) VALUES(?, ?, ?, ?)`,
 		schoolSlug, meal, name, maxPos,

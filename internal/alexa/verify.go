@@ -3,6 +3,7 @@ package alexa
 import (
 	"crypto"
 	"crypto/rsa"
+	// #nosec G505 -- Amazon ASK spec requires SHA1 for request signatures
 	"crypto/sha1"
 	"crypto/x509"
 	"encoding/base64"
@@ -84,7 +85,7 @@ func VerifySignature(body []byte, signatureB64, certURL string) error {
 	if err != nil {
 		return fmt.Errorf("decoding signature: %w", err)
 	}
-	hash := sha1.Sum(body)
+	hash := sha1.Sum(body) // #nosec G401 -- Amazon ASK spec requires SHA1 for request signatures
 	pub, ok := leaf.PublicKey.(*rsa.PublicKey)
 	if !ok {
 		return fmt.Errorf("certificate public key is not RSA")

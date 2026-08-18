@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -74,11 +76,17 @@ func (o *OIDCProvider) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to generate nonce", http.StatusInternalServerError)
 		return
 	}
+	verifier, err := randomState()
+	if err != nil {
+		http.Error(w, "failed to generate verifier", http.StatusInternalServerError)
+		return
+	}
 
-	// Store state + nonce in a short-lived cookie to prevent CSRF/fixation.
+	// Store state + nonce + PKCE verifier in a short-lived cookie to prevent CSRF/fixation.
 	stateData, _ := json.Marshal(map[string]string{
-		"state": state,
-		"nonce": nonce,
+		"state":    state,
+		"nonce":    nonce,
+		"verifier": verifier,
 	})
 	http.SetCookie(w, &http.Cookie{
 		Name:     "menu_oidc_state",
@@ -90,7 +98,7 @@ func (o *OIDCProvider) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		Secure:   true,
 	})
 
-	authURL := o.config.AuthCodeURL(state, oidc.Nonce(nonce))
+	authURL := o.config.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier))
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
@@ -115,8 +123,9 @@ func (o *OIDCProvider) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	var stateData struct {
-		State string `json:"state"`
-		Nonce string `json:"nonce"`
+		State    string `json:"state"`
+		Nonce    string `json:"nonce"`
+		Verifier string `json:"verifier"`
 	}
 	decoded, err := base64.URLEncoding.DecodeString(stateCookie.Value)
 	if err != nil {
@@ -144,7 +153,7 @@ func (o *OIDCProvider) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := o.config.Exchange(ctx, code)
+	token, err := o.config.Exchange(ctx, code, oauth2.VerifierOption(stateData.Verifier))
 	if err != nil {
 		http.Error(w, "token exchange failed", http.StatusInternalServerError)
 		return
@@ -185,17 +194,29 @@ func (o *OIDCProvider) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, cookie)
 
-	// Redirect back to the originally requested page or root.
+	// Redirect back to the originally requested page or root. Only allow
+	// same-origin relative paths to prevent open-redirect attacks.
 	redirect := "/"
-	if next := r.URL.Query().Get("next"); next != "" {
+	if next := r.URL.Query().Get("next"); next != "" && strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
 		redirect = next
 	}
-	http.Redirect(w, r, redirect, http.StatusFound)
+	http.Redirect(w, r, redirect, http.StatusFound) // #nosec G710 -- redirect is validated above to be a same-origin relative path
 }
 
-// LogoutHandler clears the local session cookie.
+// LogoutHandler clears the local session cookie and redirects to the OIDC
+// provider's end_session_endpoint when available, otherwise to the root path.
 func (o *OIDCProvider) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, o.sessions.ClearSessionCookie())
+	if end := o.EndSessionURL(); end != "" {
+		// Post-logout redirect back to the application origin.
+		postLogout := o.config.RedirectURL
+		if u, err := url.Parse(o.config.RedirectURL); err == nil {
+			postLogout = u.Scheme + "://" + u.Host + "/"
+		}
+		u := end + "?post_logout_redirect_uri=" + url.QueryEscape(postLogout)
+		http.Redirect(w, r, u, http.StatusFound)
+		return
+	}
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
