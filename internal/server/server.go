@@ -166,7 +166,32 @@ func mustInitOIDC(cfg auth.OIDCConfig, sm *auth.SessionManager) *auth.OIDCProvid
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	slog.Info("server listening", "addr", "http://localhost"+addr)
-	return http.ListenAndServe(addr, s.mux)
+	return http.ListenAndServe(addr, s.logMiddleware(s.mux))
+}
+
+// logMiddleware logs each HTTP request with method, path, status and duration.
+func (s *Server) logMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		slog.Info("request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rec.status,
+			"duration", time.Since(start).String(),
+		)
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rec *statusRecorder) WriteHeader(code int) {
+	rec.status = code
+	rec.ResponseWriter.WriteHeader(code)
 }
 
 // isWAN returns true when the request arrived via the Cloudflare tunnel.
