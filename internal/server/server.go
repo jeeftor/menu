@@ -237,14 +237,9 @@ func (s *Server) pageAuth(r *http.Request) (showSettings bool, authLink string) 
 	}
 	sess, err := s.sessions.SessionFromRequest(r)
 	if err == nil && sess != nil {
-		name := sess.Name
-		if name == "" {
-			name = sess.Email
-		}
-		if name == "" {
-			name = "User"
-		}
-		authLink = fmt.Sprintf(`<span class="nav-btn" style="cursor:default">%s</span><a class="nav-btn" href="/logout">Logout</a>`, html.EscapeString(name))
+		// Just show a Logout button; the user's name/email isn't useful here and
+		// many IdPs don't consistently populate the "name" claim.
+		authLink = `<a class="nav-btn" href="/logout">Logout</a>`
 		return
 	}
 	authLink = `<a class="nav-btn" href="/login">Login</a>`
