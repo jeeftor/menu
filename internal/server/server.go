@@ -257,8 +257,9 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dayMenus = s.resolveMenuImages(dayMenus)
-		dayMenus = filterSections(dayMenus, s.sectionIncludes(school.Slug, mealType))
-		writeWeekPage(w, dayMenus, *school, d, mealType, s.version, s.exclusions(school.Slug))
+		weekIncludes := s.sectionIncludes(school.Slug, mealType)
+		dayMenus = filterSections(dayMenus, weekIncludes)
+		writeWeekPage(w, dayMenus, *school, d, mealType, s.version, s.exclusions(school.Slug), weekIncludes)
 		return
 	}
 
@@ -291,8 +292,9 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dayMenus = s.resolveMenuImages(dayMenus)
-	dayMenus = filterSections(dayMenus, s.sectionIncludes(school.Slug, mealType))
-	writeCalendarPage(w, dayMenus, *school, year, month, mealType, s.version)
+	monthIncludes := s.sectionIncludes(school.Slug, mealType)
+	dayMenus = filterSections(dayMenus, monthIncludes)
+	writeCalendarPage(w, dayMenus, *school, year, month, mealType, s.version, monthIncludes)
 }
 
 func (s *Server) handleAPILunch(w http.ResponseWriter, r *http.Request) {
@@ -589,7 +591,7 @@ type jsonSection struct {
 	Foods []jsonFood `json:"foods"`
 }
 
-func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, year, month int, mealType, version string) {
+func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, year, month int, mealType, version string, sectionOrder []string) {
 	monthName := time.Month(month).String()
 	prevM, prevY := month-1, year
 	if prevM == 0 {
@@ -664,8 +666,12 @@ func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, scho
 		rows.WriteString(`</div>`)
 	}
 
-	// Section order JSON for JS modal
-	orderJSON, _ := json.Marshal(modalSectionOrder)
+	// Section order JSON for JS modal — prefer configured includes order, fall back to default.
+	order := modalSectionOrder
+	if len(sectionOrder) > 0 {
+		order = sectionOrder
+	}
+	orderJSON, _ := json.Marshal(order)
 
 	// School+meal selector
 	schoolSel := buildSchoolSelector("month", school.Slug, mealType, year, month, "")
@@ -864,7 +870,7 @@ func monthDayCell(cd calDay, day menu.DayMenu, hasMenu bool) string {
 }
 
 // writeWeekPage renders a detailed single-week view.
-func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time, mealType, version string, exclusions []string) {
+func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school nutrislice.School, anchor time.Time, mealType, version string, exclusions []string, sectionOrder []string) {
 	// Find Mon of this week
 	monday := anchor.AddDate(0, 0, -int(anchor.Weekday()-time.Monday))
 	if anchor.Weekday() == time.Sunday {
@@ -876,7 +882,11 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 	nextDate := monday.AddDate(0, 0, 7).Format("2006-01-02")
 	monthLink := fmt.Sprintf("/calendar?view=month&year=%d&month=%d&school=%s&meal=%s",
 		anchor.Year(), int(anchor.Month()), school.Slug, mealType)
-	orderJSON, _ := json.Marshal(modalSectionOrder)
+	weekOrder := modalSectionOrder
+	if len(sectionOrder) > 0 {
+		weekOrder = sectionOrder
+	}
+	orderJSON, _ := json.Marshal(weekOrder)
 
 	// Dynamic CLR/EMOJI for JS modal
 	clrMap := make(map[string][2]string)
