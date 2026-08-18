@@ -133,6 +133,11 @@ func (o *OIDCProvider) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
+		http.Error(w, fmt.Sprintf("oidc error: %s - %s", oauthErr, r.URL.Query().Get("error_description")), http.StatusBadRequest)
+		return
+	}
+
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		http.Error(w, "missing code", http.StatusBadRequest)
