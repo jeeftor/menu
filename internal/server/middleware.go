@@ -147,18 +147,34 @@ func (s *Server) securityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// logMiddleware logs each HTTP request with method, path, status and duration.
+// logMiddleware logs each HTTP request with method, path, status, duration and
+// client information.
 func (s *Server) logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		slog.Info("request",
+		attrs := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
+			"query", r.URL.RawQuery,
 			"status", rec.status,
 			"duration", time.Since(start).String(),
-		)
+			"client_ip", clientIP(r),
+		}
+		if ua := r.UserAgent(); ua != "" {
+			attrs = append(attrs, "user_agent", ua)
+		}
+		if ref := r.Referer(); ref != "" {
+			attrs = append(attrs, "referer", ref)
+		}
+		if rec.status >= 500 {
+			slog.Error("request", attrs...)
+		} else if rec.status >= 400 {
+			slog.Warn("request", attrs...)
+		} else {
+			slog.Info("request", attrs...)
+		}
 	})
 }
 

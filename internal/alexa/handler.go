@@ -45,45 +45,77 @@ func New(cfg Config) *Handler {
 // ServeHTTP handles an incoming Alexa request.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		slog.Warn("alexa: rejected non-POST request", "method", r.Method, "remote", r.RemoteAddr)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		slog.Error("alexa: reading body", "err", err)
+		slog.Error("alexa: reading body", "err", err, "remote", r.RemoteAddr)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
 	var env RequestEnvelope
 	if err := json.Unmarshal(body, &env); err != nil {
-		slog.Error("alexa: parsing request", "err", err)
+		slog.Error("alexa: parsing request", "err", err, "remote", r.RemoteAddr, "body", string(body))
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
+	reqID := env.Request.RequestID
+	slog.Info("alexa: request received",
+		"request_id", reqID,
+		"request_type", env.Request.Type,
+		"app_id", applicationID(&env),
+		"timestamp", env.Request.Timestamp,
+		"locale", env.Request.Locale,
+		"remote", r.RemoteAddr,
+	)
+
 	if h.cfg.VerifyRequests {
 		if err := verifyHTTPRequest(body, r, &env); err != nil {
-			slog.Warn("alexa: request verification failed", "err", err)
+			slog.Warn("alexa: request verification failed",
+				"request_id", reqID,
+				"err", err,
+				"signature", r.Header.Get("Signature") != "",
+				"cert_url", r.Header.Get("SignatureCertChainUrl"),
+			)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		slog.Info("alexa: request signature verified", "request_id", reqID)
 	}
 
 	if h.cfg.ApplicationID != "" {
 		id := applicationID(&env)
 		if id != "" && id != h.cfg.ApplicationID {
-			slog.Warn("alexa: application ID mismatch", "got", id)
+			slog.Warn("alexa: application ID mismatch",
+				"request_id", reqID,
+				"got", id,
+				"expected", h.cfg.ApplicationID,
+			)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		slog.Info("alexa: application ID matched", "request_id", reqID, "app_id", id)
 	}
 
 	resp := h.handle(&env)
+	respText := ""
+	if resp.Response.OutputSpeech != nil {
+		respText = resp.Response.OutputSpeech.Text
+	}
+	slog.Info("alexa: response sent",
+		"request_id", reqID,
+		"request_type", env.Request.Type,
+		"response", respText,
+		"should_end_session", resp.Response.ShouldEndSession,
+	)
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Error("alexa: encoding response", "err", err)
+		slog.Error("alexa: encoding response", "request_id", reqID, "err", err)
 	}
 }
 
@@ -136,9 +168,12 @@ func (h *Handler) handle(env *RequestEnvelope) *ResponseEnvelope {
 
 func (h *Handler) handleIntent(intent *Intent, resp *ResponseEnvelope) {
 	if intent == nil {
+		slog.Warn("alexa: received nil intent")
 		resp.Response.OutputSpeech = unknownSpeech()
 		return
 	}
+
+	slog.Info("alexa: handling intent", "intent", intent.Name, "slots", slotMap(intent))
 
 	switch intent.Name {
 	case "MenuQueryIntent":
@@ -158,6 +193,7 @@ func (h *Handler) handleIntent(intent *Intent, resp *ResponseEnvelope) {
 		resp.Response.OutputSpeech = unknownSpeech()
 		resp.Response.ShouldEndSession = false
 	default:
+		slog.Warn("alexa: unknown intent", "intent", intent.Name)
 		resp.Response.OutputSpeech = unknownSpeech()
 	}
 }
@@ -166,15 +202,34 @@ func (h *Handler) handleMenuQuery(intent *Intent, resp *ResponseEnvelope) {
 	dateSlot := slotValue(intent, "date")
 	dateParam := h.resolveDateSlot(dateSlot)
 
+	slog.Info("alexa: menu query",
+		"raw_slot", dateSlot,
+		"resolved_date_param", dateParam,
+		"school", h.cfg.DefaultSchool,
+		"meal", h.cfg.DefaultMeal,
+	)
+
 	summary, err := h.cfg.ResolveSummary(dateParam, h.cfg.DefaultSchool, h.cfg.DefaultMeal)
 	if err != nil {
-		slog.Error("alexa: resolving summary", "err", err)
+		slog.Error("alexa: resolving summary failed",
+			"date_param", dateParam,
+			"school", h.cfg.DefaultSchool,
+			"meal", h.cfg.DefaultMeal,
+			"err", err,
+		)
 		resp.Response.OutputSpeech = &OutputSpeech{
 			Type: "PlainText",
 			Text: "I couldn't look up the menu right now. Please try again later.",
 		}
 		return
 	}
+
+	slog.Info("alexa: summary resolved",
+		"date_param", dateParam,
+		"resolved_date", summary.Date,
+		"school", summary.School,
+		"text", summary.Text,
+	)
 
 	text := summary.Text
 	if text == "" {
@@ -229,6 +284,18 @@ func slotValue(intent *Intent, name string) string {
 		return s.Value
 	}
 	return ""
+}
+
+// slotMap returns a flat map of slot names to values for logging.
+func slotMap(intent *Intent) map[string]string {
+	if intent == nil || intent.Slots == nil {
+		return nil
+	}
+	m := make(map[string]string, len(intent.Slots))
+	for k, v := range intent.Slots {
+		m[k] = v.Value
+	}
+	return m
 }
 
 func unknownSpeech() *OutputSpeech {

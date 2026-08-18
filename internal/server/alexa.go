@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 
 	"menu/internal/alexa"
@@ -8,6 +9,12 @@ import (
 
 // newAlexaHandler builds the Alexa HTTP handler for this server.
 func newAlexaHandler(s *Server, cfg *AlexaConfig) http.Handler {
+	slog.Info("alexa: handler configured",
+		"application_id", cfg.ApplicationID,
+		"verify_requests", cfg.VerifyRequests,
+		"default_school", cfg.DefaultSchool,
+		"default_meal", cfg.DefaultMeal,
+	)
 	return alexa.New(alexa.Config{
 		ApplicationID:  cfg.ApplicationID,
 		VerifyRequests: cfg.VerifyRequests,
