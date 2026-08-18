@@ -8,10 +8,7 @@
           "slots": [
             {
               "name": "date",
-              "type": "AMAZON.DATE",
-              "samples": [
-                "{date}"
-              ]
+              "type": "AMAZON.DATE"
             }
           ],
           "samples": [
