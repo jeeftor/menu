@@ -202,6 +202,24 @@ const settingsPage = `<!DOCTYPE html>
     .si-chip-del{background:none;border:none;color:#64748B;font-size:.8rem;cursor:pointer;padding:0 .1rem;line-height:1}
     .si-chip-del:hover{color:#EF4444}
     .si-pop{position:fixed;z-index:9999;background:#1E293B;border:1px solid #334155;border-radius:10px;padding:.7rem .9rem;max-width:240px;font-size:.75rem;color:#E2E8F0;box-shadow:0 8px 24px rgba(0,0,0,.3);pointer-events:none}
+    .si-grid{display:grid;grid-template-columns:3.5rem auto auto;gap:.35rem .5rem;align-items:center}
+    .si-row-lbl{font-size:.75rem;font-weight:700;color:#64748B;text-align:right;padding-right:.35rem;white-space:nowrap}
+    .si-tab{font-size:.78rem;padding:.28rem .85rem;border-radius:20px;border:1px solid #CBD5E1;background:#fff;cursor:pointer;transition:all .15s;color:#475569;white-space:nowrap;font-family:inherit}
+    .si-tab:hover{border-color:#3B82F6;color:#3B82F6}
+    .si-tab.active{background:#3B82F6;border-color:#3B82F6;color:#fff}
+    @media(max-width:640px){
+      header{padding:.75rem 1rem}
+      header h1{font-size:1.05rem}
+      .page{padding:0 .5rem;margin:.85rem auto;gap:1rem}
+      .card-hdr{padding:.75rem 1rem}
+      .card-body{padding:.85rem 1rem}
+      .add-form{flex-direction:column;gap:.65rem;align-items:stretch}
+      .field{min-width:0;width:100%}
+      .add-btn{width:100%;padding:.5rem 1rem}
+      .data-table{font-size:.75rem}
+      .url-cell{max-width:130px}
+      .prev-img{width:32px;height:32px}
+    }
   </style>
 </head>
 <body>
@@ -288,21 +306,13 @@ const settingsPage = `<!DOCTYPE html>
     <div class="card-body">
       [[SECTION_INCLUDES_TABLE]]
       <div style="display:flex;flex-direction:column;gap:.8rem">
-        <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end">
-          <div class="field">
-            <label>School</label>
-            <select id="si-school" onchange="siLoad()">
-              <option value="">Pick a school…</option>
-              [[SCHOOL_OPTIONS]]
-            </select>
-          </div>
-          <div class="field">
-            <label>Meal</label>
-            <select id="si-meal" onchange="siLoad()">
-              <option value="lunch">Lunch</option>
-              <option value="breakfast">Breakfast</option>
-            </select>
-          </div>
+        <div class="si-grid">
+          <div class="si-row-lbl">WRES</div>
+          <button class="si-tab" data-school="woodmen-roberts-elementary-school" data-meal="breakfast" onclick="siPickTab(this)">Breakfast</button>
+          <button class="si-tab" data-school="woodmen-roberts-elementary-school" data-meal="lunch" onclick="siPickTab(this)">Lunch</button>
+          <div class="si-row-lbl">EMS</div>
+          <button class="si-tab" data-school="eagleview-middle-school" data-meal="breakfast" onclick="siPickTab(this)">Breakfast</button>
+          <button class="si-tab" data-school="eagleview-middle-school" data-meal="lunch" onclick="siPickTab(this)">Lunch</button>
         </div>
         <div id="si-panel" style="display:none;flex-direction:column;gap:.65rem">
           <div>
@@ -413,10 +423,20 @@ document.getElementById('ex-form').addEventListener('submit', function(e) {
 // ── Section Includes: drag-chip UI ──────────────────────────────────────────
 var siTodayCache = {};
 var siDragSrc = null;
+var siCurSchool = '';
+var siCurMeal = '';
+
+function siPickTab(btn) {
+  document.querySelectorAll('.si-tab').forEach(function(t){ t.classList.remove('active'); });
+  btn.classList.add('active');
+  siCurSchool = btn.dataset.school;
+  siCurMeal = btn.dataset.meal;
+  siLoad();
+}
 
 function siLoad() {
-  var school = document.getElementById('si-school').value;
-  var meal = document.getElementById('si-meal').value;
+  var school = siCurSchool;
+  var meal = siCurMeal;
   var panel = document.getElementById('si-panel');
   var empty = document.getElementById('si-empty');
   panel.style.display = 'none'; empty.style.display = 'none';
@@ -520,8 +540,8 @@ function siRemoveChip(btn) {
 }
 
 function siSave() {
-  var school = document.getElementById('si-school').value;
-  var meal = document.getElementById('si-meal').value;
+  var school = siCurSchool;
+  var meal = siCurMeal;
   var chips = document.getElementById('si-chips').querySelectorAll('.si-chip');
   var status = document.getElementById('si-status');
   if (!chips.length) { status.textContent = 'No sections selected.'; return; }
@@ -550,8 +570,8 @@ function siSave() {
 
 // Hover popover
 function siShowPop(name, e) {
-  var school = document.getElementById('si-school').value;
-  var meal = document.getElementById('si-meal').value;
+  var school = siCurSchool;
+  var meal = siCurMeal;
   var pop = document.getElementById('si-pop');
   pop.style.display = 'block';
   pop.innerHTML = '<em style="color:#64748B">Loading today\'s ' + escHtml(name) + '…</em>';

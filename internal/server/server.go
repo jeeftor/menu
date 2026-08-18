@@ -713,7 +713,7 @@ func buildSchoolSelector(view, activeSchool, activeMeal string, year, month int,
 	var sb strings.Builder
 	for _, sch := range nutrislice.DefaultSchools {
 		sb.WriteString(`<div class="sch-grp">`)
-		sb.WriteString(`<span class="sch-name">` + html.EscapeString(sch.Name) + `</span>`)
+		sb.WriteString(`<span class="sch-name">` + html.EscapeString(sch.ShortName) + `</span>`)
 		for _, meal := range []string{"breakfast", "lunch"} {
 			active := ""
 			if sch.Slug == activeSchool && meal == activeMeal {
@@ -1095,6 +1095,34 @@ const calendarPage = `<!DOCTYPE html>
     .m-food-meta{font-size:.75rem;color:#64748B;margin-top:.15rem}
     .m-tags{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.3rem}
     .tag{font-size:.65rem;padding:.15rem .45rem;border-radius:20px;background:#F1F5F9;color:#475569;font-weight:600}
+    @media(max-width:640px){
+      header{flex-wrap:wrap;padding:.75rem 1rem}
+      .hdr-left h1{font-size:1.05rem}
+      .ver-badge{display:none}
+      .month-nav{gap:.3rem;flex-wrap:wrap}
+      .nav-btn{padding:.3rem .55rem;font-size:.75rem}
+      .view-btn{padding:.3rem .55rem;font-size:.72rem}
+      .school-bar{padding:.35rem .75rem;gap:.5rem}
+      .sch-name{display:none}
+      .legend{padding:.4rem .75rem;gap:.6rem}
+      .leg-item{font-size:.7rem}
+      .cal-wrap{padding:0 .25rem;margin:.5rem auto;overflow-x:auto}
+      .day-headers,.week-row{min-width:520px}
+      .day-hdr{font-size:.58rem;padding:.25rem .1rem}
+      .day-cell{min-height:80px;padding:.28rem .22rem}
+      .day-cell.day-pad{min-height:80px}
+      .day-num{font-size:.78rem;margin-bottom:.2rem}
+      .opt{padding:.12rem .2rem;margin-bottom:.12rem;font-size:.62rem;gap:.2rem}
+      .opt-lbl{font-size:.52rem;min-width:20px}
+      .opt-img{width:20px;height:20px}
+      .opt-name{font-size:.6rem}
+      .opt-more{font-size:.58rem}
+      .overlay{align-items:flex-end}
+      .modal{width:100%;max-width:none;border-radius:16px 16px 0 0;position:fixed;bottom:0;top:auto;max-height:90vh}
+      .modal-body{padding:.85rem 1rem}
+      .m-food-img{width:42px;height:42px}
+      .m-placeholder{width:42px;height:42px}
+    }
   </style>
 </head>
 <body>
@@ -1289,6 +1317,22 @@ const weekPage = `<!DOCTYPE html>
     .wk-side-lbl{font-weight:700;color:#475569}
     .wk-no-school{flex:1;display:flex;align-items:center;justify-content:center;color:#CBD5E1;font-size:.82rem;padding:2rem}
     .wk-col > *:last-child{margin-bottom:.6rem}
+    @media(max-width:640px){
+      header{padding:.75rem 1rem}
+      .hdr-left h1{font-size:1rem}
+      .ver-badge{display:none}
+      .hdr-right{gap:.3rem;flex-wrap:wrap}
+      .nav-btn{padding:.3rem .55rem;font-size:.75rem}
+      .view-btn{padding:.3rem .55rem;font-size:.72rem}
+      .school-bar{padding:.35rem .75rem;gap:.5rem}
+      .sch-name{display:none}
+      .wk-wrap{overflow-x:auto;grid-template-columns:repeat(5,minmax(145px,1fr));padding:0 .25rem;margin:.5rem auto}
+      .wk-col{min-width:145px}
+      .wk-day{font-size:1.5rem}
+      .wk-food-name{font-size:.75rem}
+      .wk-img{width:32px;height:32px}
+      .wk-opt-lbl{font-size:.6rem}
+    }
   </style>
 </head>
 <body>

@@ -116,6 +116,21 @@ const apiExplorerPage = `<!DOCTYPE html>
     .mcp-tool{font-family:"SF Mono",Consolas,monospace;font-size:.95rem;font-weight:700;color:#93C5FD;margin-bottom:.3rem}
     .mcp-desc{color:#94A3B8;font-size:.82rem;margin-bottom:.7rem;line-height:1.55}
     .code-block{background:#020617;border:1px solid #334155;border-radius:6px;padding:.7rem .9rem;font-family:"SF Mono",Consolas,monospace;font-size:.72rem;color:#BAE6FD;white-space:pre;overflow-x:auto}
+    @media(max-width:640px){
+      body{overflow:auto;height:auto}
+      header{flex-wrap:wrap;padding:.55rem .9rem;gap:.5rem}
+      .hdr-logo{font-size:.88rem}
+      .tabs{margin-left:0;order:3;width:100%}
+      .tab-btn{flex:1;text-align:center}
+      .layout{flex-direction:column;overflow:visible}
+      .sidebar{display:none}
+      .main{overflow:visible;padding:.85rem .9rem}
+      .ep-hdr{flex-wrap:wrap;gap:.4rem}
+      .ep-tag{margin-left:0;order:3}
+      .try-row{flex-direction:column;align-items:stretch}
+      .tf input,.tf select{width:100%}
+      .try-btn,.copy-btn{width:100%;text-align:center}
+    }
   </style>
 </head>
 <body>
