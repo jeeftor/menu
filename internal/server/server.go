@@ -1092,7 +1092,15 @@ const calendarPage = `<!DOCTYPE html>
     .modal-nav[disabled]{opacity:.2;cursor:default}
     .modal-body{padding:1.1rem 1.4rem}
     .m-sec{margin-bottom:1.1rem}
-    .m-sec-hdr{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:.3rem .6rem;border-radius:4px;margin-bottom:.5rem;border-left:3px solid}
+    .m-sec-hdr{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:.3rem .6rem;border-radius:4px;margin-bottom:.5rem;border-left:3px solid;display:flex;align-items:center;gap:.35rem}
+    .m-drag-handle{color:#CBD5E1;font-size:.85rem;cursor:grab;flex-shrink:0;line-height:1}
+    .m-sec[draggable="true"]:hover .m-drag-handle{color:#94A3B8}
+    .m-sec.m-drag-over{outline:2px dashed #3B82F6;outline-offset:2px;border-radius:8px}
+    .m-sec[draggable="true"]{cursor:default;transition:opacity .15s}
+    .m-sec[draggable="true"].dragging{opacity:.45}
+    .m-save-bar{display:flex;align-items:center;gap:.75rem;padding:.75rem 0 .25rem;margin-top:.25rem;border-top:1px solid #E2E8F0}
+    .m-save-btn{background:#3B82F6;border:none;color:#fff;padding:.38rem .9rem;border-radius:6px;font-size:.82rem;font-weight:600;cursor:pointer}
+    .m-save-btn:hover{background:#2563EB}
     .m-food{display:flex;align-items:center;gap:.75rem;padding:.45rem 0;border-bottom:1px solid #F1F5F9}
     .m-food:last-child{border-bottom:none}
     .m-food-img{width:54px;height:54px;object-fit:cover;border-radius:8px;flex-shrink:0}
@@ -1189,6 +1197,9 @@ var CLR = [[CLR_JSON]];
 var EMOJI = [[EMOJI_JSON]];
 var DATES = Object.keys(MENU).sort();
 var CUR_DATE = null;
+var SCHOOL = '[[SCHOOL_SLUG]]';
+var MEAL = '[[MEAL]]';
+var mDragSrc = null;
 
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
@@ -1222,6 +1233,7 @@ function openDay(dateStr) {
     return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
   }) : secs;
 
+  var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
   var html = '';
   for (var i = 0; i < sorted.length; i++) {
     var sec = sorted[i];
@@ -1229,9 +1241,11 @@ function openDay(dateStr) {
     var clr = CLR[sec.name] || ['#64748B','#F8FAFC'];
     var tc = clr[0], bg = clr[1];
     var em = EMOJI[sec.name] || '&#x1F374;';
+    var dragAttrs = isTouch ? '' : ' draggable="true" data-sec-name="' + esc(sec.name) + '"';
+    var handle = isTouch ? '' : '<span class="m-drag-handle">&#x2807;</span>';
 
-    html += '<div class="m-sec">';
-    html += '<div class="m-sec-hdr" style="color:' + tc + ';background:' + bg + ';border-left-color:' + tc + '">' + em + ' ' + esc(sec.name) + '</div>';
+    html += '<div class="m-sec"' + dragAttrs + '>';
+    html += '<div class="m-sec-hdr" style="color:' + tc + ';background:' + bg + ';border-left-color:' + tc + '">' + handle + em + ' ' + esc(sec.name) + '</div>';
 
     for (var j = 0; j < sec.foods.length; j++) {
       var f = sec.foods[j];
@@ -1254,10 +1268,75 @@ function openDay(dateStr) {
     }
     html += '</div>';
   }
+  if (!isTouch) {
+    html += '<div class="m-save-bar" id="m-save-bar" style="display:none">' +
+      '<button class="m-save-btn" onclick="modalSaveOrder()">Save Section Order</button>' +
+      '<span id="m-save-status" style="font-size:.78rem;color:#64748B"></span></div>';
+  }
 
-  document.getElementById('modal-body').innerHTML = html;
+  var body = document.getElementById('modal-body');
+  body.innerHTML = html;
+  if (!isTouch) setupModalDrag(body);
   document.getElementById('overlay').classList.add('open');
   document.body.style.overflow = 'hidden';
+}
+
+function setupModalDrag(body) {
+  var secs = body.querySelectorAll('.m-sec[draggable]');
+  secs.forEach(function(sec) {
+    sec.addEventListener('dragstart', function(e) {
+      mDragSrc = sec;
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(function(){ sec.classList.add('dragging'); }, 0);
+    });
+    sec.addEventListener('dragend', function() {
+      mDragSrc = null;
+      sec.classList.remove('dragging');
+      body.querySelectorAll('.m-sec').forEach(function(s){ s.classList.remove('m-drag-over'); });
+    });
+    sec.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      body.querySelectorAll('.m-sec').forEach(function(s){ s.classList.remove('m-drag-over'); });
+      sec.classList.add('m-drag-over');
+    });
+    sec.addEventListener('dragleave', function(e) {
+      if (!sec.contains(e.relatedTarget)) sec.classList.remove('m-drag-over');
+    });
+    sec.addEventListener('drop', function(e) {
+      e.preventDefault();
+      sec.classList.remove('m-drag-over');
+      if (!mDragSrc || mDragSrc === sec) return;
+      var rect = sec.getBoundingClientRect();
+      if (e.clientY < rect.top + rect.height / 2) {
+        body.insertBefore(mDragSrc, sec);
+      } else {
+        sec.after ? sec.after(mDragSrc) : body.insertBefore(mDragSrc, sec.nextSibling);
+      }
+      var bar = document.getElementById('m-save-bar');
+      if (bar) bar.style.display = 'flex';
+    });
+  });
+}
+
+function modalSaveOrder() {
+  var secs = document.getElementById('modal-body').querySelectorAll('.m-sec[data-sec-name]');
+  var names = [];
+  secs.forEach(function(s){ names.push(s.getAttribute('data-sec-name')); });
+  var status = document.getElementById('m-save-status');
+  status.textContent = 'Saving\u2026';
+  fetch('/api/v1/section-includes/order', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({school_slug: SCHOOL, meal_type: MEAL, sections: names})
+  }).then(function(r) {
+    if (r.ok || r.status === 204) {
+      status.textContent = 'Saved!';
+      ORDER = names;
+    } else {
+      status.textContent = 'Error saving.';
+    }
+  }).catch(function(){ status.textContent = 'Error saving.'; });
 }
 
 function closeModal() {
