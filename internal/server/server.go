@@ -482,7 +482,7 @@ func (s *Server) findNextMenuDay(school nutrislice.School, mealType string) (men
 		if err != nil {
 			continue
 		}
-		if len(day.OptionSections()) > 0 {
+		if day.HasMenu() {
 			return day, nil
 		}
 	}
@@ -782,13 +782,32 @@ func monthDayCell(cd calDay, day menu.DayMenu, hasMenu bool) string {
 	fmt.Fprintf(&sb, `<div class="day-cell%s%s" onclick="openDay('%s')">`, todayCls, otherCls, d.Format("2006-01-02"))
 	fmt.Fprintf(&sb, `<div class="day-num"><span class="dow">%s</span>%d</div>`, d.Format("Mon"), d.Day())
 
+	// Detect style: if any "Option N" section exists, only show those (Woodmen Roberts).
+	// Otherwise show all non-empty sections (Eagleview named-section style).
+	hasOptions := false
+	for _, sec := range day.Sections {
+		if _, _, ok := optionColor(sec.Name); ok {
+			hasOptions = true
+			break
+		}
+	}
+
 	const maxVisible = 3
 	shown := 0
 	total := 0
+	paletteIdx := 0
 	for _, sec := range day.Sections {
 		text, bg, isOpt := optionColor(sec.Name)
-		if !isOpt || len(sec.Foods) == 0 {
+		if len(sec.Foods) == 0 {
 			continue
+		}
+		if hasOptions && !isOpt {
+			continue
+		}
+		if !hasOptions {
+			c := optionPalette[paletteIdx%len(optionPalette)]
+			text, bg = c[0], c[1]
+			paletteIdx++
 		}
 		total++
 		if shown >= maxVisible {
@@ -800,15 +819,20 @@ func monthDayCell(cd calDay, day menu.DayMenu, hasMenu bool) string {
 		if len(name) > 22 {
 			name = name[:20] + "…"
 		}
-		label := strings.TrimPrefix(sec.Name, "Option ")
+		var label string
+		if isOpt {
+			label = "Opt " + strings.TrimPrefix(sec.Name, "Option ")
+		} else {
+			label = sec.Name
+		}
 		img := ""
 		if p.ImageURL != "" {
 			img = fmt.Sprintf(`<img src="%s" alt="%s" class="opt-img" loading="lazy">`,
 				p.ImageURL, html.EscapeString(p.Name))
 		}
 		fmt.Fprintf(&sb,
-			`<div class="opt" style="border-left-color:%s;background:%s"><span class="opt-lbl" style="color:%s">Opt %s</span><span class="opt-name">%s</span>%s</div>`,
-			text, bg, text, label, html.EscapeString(name), img)
+			`<div class="opt" style="border-left-color:%s;background:%s"><span class="opt-lbl" style="color:%s">%s</span><span class="opt-name">%s</span>%s</div>`,
+			text, bg, text, html.EscapeString(label), html.EscapeString(name), img)
 	}
 	if total > maxVisible {
 		fmt.Fprintf(&sb, `<div class="opt-more">+%d more</div>`, total-maxVisible)

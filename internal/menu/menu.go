@@ -40,6 +40,18 @@ func (d DayMenu) OptionSections() []Section {
 	return out
 }
 
+// HasMenu returns true if any section contains at least one food item.
+// Works for both "Option N" style (Woodmen Roberts) and named-section
+// style (Eagleview) menus.
+func (d DayMenu) HasMenu() bool {
+	for _, s := range d.Sections {
+		if len(s.Foods) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // SectionByName returns the first section with the given name, or nil.
 func (d DayMenu) SectionByName(name string) *Section {
 	for i, s := range d.Sections {
