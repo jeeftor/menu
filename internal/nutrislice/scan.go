@@ -8,6 +8,60 @@ import (
 	"strings"
 )
 
+// ScanSections scans cached menu files for a given school slug and meal type
+// and returns the unique section names found (sorted). Pass empty strings to
+// match all schools/meals.
+func (c *Client) ScanSections(schoolSlug, mealType string) ([]string, error) {
+	if c.CacheDir == "" {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(c.CacheDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		// Cache filename: {district}_{slug}_{meal}_{date}.json
+		parts := strings.SplitN(strings.TrimSuffix(e.Name(), ".json"), "_", 4)
+		if len(parts) < 3 {
+			continue
+		}
+		if schoolSlug != "" && parts[1] != schoolSlug {
+			continue
+		}
+		if mealType != "" && parts[2] != mealType {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(c.CacheDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var week WeekResponse
+		if err := json.Unmarshal(data, &week); err != nil {
+			continue
+		}
+		for _, day := range week.Days {
+			for _, mi := range day.MenuItems {
+				if (mi.IsSectionTitle || mi.IsStationHeader) && strings.TrimSpace(mi.Text) != "" {
+					seen[strings.TrimSpace(mi.Text)] = true
+				}
+			}
+		}
+	}
+	sections := make([]string, 0, len(seen))
+	for s := range seen {
+		sections = append(sections, s)
+	}
+	sort.Strings(sections)
+	return sections, nil
+}
+
 // ScanMissingImages scans all cached menu JSON files and returns food names
 // that appear in menus but have no API-provided image URL.
 // customCovered is a set of normalized (lower-case) food names that already

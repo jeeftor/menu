@@ -188,6 +188,28 @@ func (s *Server) handleAPIExclusions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ── /api/v1/sections ──────────────────────────────────────────────────────────
+
+// handleAPISections returns the unique section names found in cached menu files
+// for the given school+meal. Used to populate the Section Include Rules form.
+func (s *Server) handleAPISections(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	school := r.URL.Query().Get("school")
+	meal := r.URL.Query().Get("meal")
+	sections, err := s.client.ScanSections(school, meal)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if sections == nil {
+		sections = []string{}
+	}
+	writeJSON(w, sections)
+}
+
 // ── /api/v1/missing-images ────────────────────────────────────────────────────
 
 // handleAPIMissingImages scans cached menu JSON files and returns food names

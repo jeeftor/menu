@@ -272,29 +272,35 @@ const settingsPage = `<!DOCTYPE html>
   <div class="card">
     <div class="card-hdr">
       <h2>Section Include Rules</h2>
-      <p>Restrict which option sections count for a school+meal. When rules exist, only listed sections are shown. Example: add <code>Option 1</code> for Woodmen Roberts breakfast to hide the cereal bar.</p>
+      <p>Choose which sections to show for a school+meal. Pick a school and meal below — sections found in the cache will appear as checkboxes.</p>
     </div>
     <div class="card-body">
       [[SECTION_INCLUDES_TABLE]]
-      <form class="add-form" id="si-form">
-        <div class="field">
-          <label>Section Name</label>
-          <input name="section_name" placeholder="e.g. Option 1" required>
+      <div class="add-form" style="flex-direction:column;gap:.75rem">
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end">
+          <div class="field">
+            <label>School</label>
+            <select id="si-school" onchange="siLoadSections()">
+              <option value="">Pick a school…</option>
+              [[SCHOOL_OPTIONS]]
+            </select>
+          </div>
+          <div class="field">
+            <label>Meal Type</label>
+            <select id="si-meal" onchange="siLoadSections()">
+              <option value="lunch">Lunch</option>
+              <option value="breakfast">Breakfast</option>
+            </select>
+          </div>
         </div>
-        <div class="field">
-          <label>School</label>
-          <select name="school_slug">[[SCHOOL_OPTIONS]]</select>
+        <div id="si-sections" style="display:none">
+          <div style="font-size:.75rem;font-weight:600;color:#475569;margin-bottom:.4rem">Sections found in cache — check to include:</div>
+          <div id="si-checklist" style="display:flex;flex-wrap:wrap;gap:.4rem .75rem"></div>
+          <button class="add-btn" style="margin-top:.65rem" onclick="siSaveChecked()">Save Selected</button>
+          <span id="si-status" style="font-size:.8rem;color:#64748B;margin-left:.5rem"></span>
         </div>
-        <div class="field">
-          <label>Meal Type</label>
-          <select name="meal_type">
-            <option value="">All meals</option>
-            <option value="lunch">Lunch</option>
-            <option value="breakfast">Breakfast</option>
-          </select>
-        </div>
-        <button class="add-btn" type="submit">Add Rule</button>
-      </form>
+        <div id="si-empty" style="font-size:.82rem;color:#94A3B8;font-style:italic;display:none">No cached data found for this school+meal. Visit the calendar for that school first to populate the cache.</div>
+      </div>
     </div>
   </div>
 
@@ -384,14 +390,54 @@ document.getElementById('ex-form').addEventListener('submit', function(e) {
   }
 })();
 
-document.getElementById('si-form').addEventListener('submit', function(e) {
-  e.preventDefault();
-  var f = e.target;
-  fetch('/api/v1/section-includes', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({section_name: f.section_name.value, school_slug: f.school_slug.value, meal_type: f.meal_type.value})
-  }).then(function(r){ if(r.ok||r.status===204) location.reload(); else r.text().then(function(t){alert('Error: '+t);}); });
-});
+function siLoadSections() {
+  var school = document.getElementById('si-school').value;
+  var meal = document.getElementById('si-meal').value;
+  var sectionsDiv = document.getElementById('si-sections');
+  var emptyDiv = document.getElementById('si-empty');
+  var checklist = document.getElementById('si-checklist');
+  if (!school) { sectionsDiv.style.display='none'; emptyDiv.style.display='none'; return; }
+  sectionsDiv.style.display='none'; emptyDiv.style.display='none';
+  checklist.innerHTML = '<em style="color:#64748B;font-size:.78rem">Loading…</em>';
+  fetch('/api/v1/sections?school=' + encodeURIComponent(school) + '&meal=' + encodeURIComponent(meal))
+    .then(function(r){ return r.json(); })
+    .then(function(names) {
+      checklist.innerHTML = '';
+      if (!names || names.length === 0) { emptyDiv.style.display='block'; return; }
+      names.forEach(function(name) {
+        var lbl = document.createElement('label');
+        lbl.style.cssText = 'display:flex;align-items:center;gap:.3rem;font-size:.82rem;cursor:pointer;padding:.2rem .5rem;border:1px solid #E2E8F0;border-radius:6px;background:#F8FAFC';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.value = name;
+        lbl.appendChild(cb);
+        lbl.appendChild(document.createTextNode(name));
+        checklist.appendChild(lbl);
+      });
+      sectionsDiv.style.display='block';
+      document.getElementById('si-status').textContent = '';
+    })
+    .catch(function(){ emptyDiv.style.display='block'; });
+}
+
+function siSaveChecked() {
+  var school = document.getElementById('si-school').value;
+  var meal = document.getElementById('si-meal').value;
+  var checks = document.querySelectorAll('#si-checklist input[type=checkbox]:checked');
+  if (!checks.length) { document.getElementById('si-status').textContent = 'Nothing checked.'; return; }
+  var status = document.getElementById('si-status');
+  status.textContent = 'Saving…';
+  var promises = [];
+  for (var i = 0; i < checks.length; i++) {
+    promises.push(fetch('/api/v1/section-includes', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({section_name: checks[i].value, school_slug: school, meal_type: meal})
+    }));
+  }
+  Promise.all(promises).then(function(results) {
+    var ok = results.every(function(r){ return r.ok || r.status === 204 || r.status === 409; });
+    if (ok) { location.reload(); } else { status.textContent = 'Some saves failed.'; }
+  }).catch(function(){ status.textContent = 'Error saving.'; });
+}
 
 function scanMissing() {
   var btn = document.getElementById('scan-btn');
