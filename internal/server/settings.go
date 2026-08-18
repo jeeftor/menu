@@ -298,6 +298,21 @@ const settingsPage = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Missing Images -->
+  <div class="card">
+    <div class="card-hdr">
+      <h2>Missing Images</h2>
+      <p>Scan cached menu data to find food items that have no image. Click an item to prefill the Add Image form above.</p>
+    </div>
+    <div class="card-body">
+      <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
+        <button class="add-btn" id="scan-btn" onclick="scanMissing()">Scan Cache</button>
+        <span id="scan-status" style="font-size:.82rem;color:#64748B"></span>
+      </div>
+      <div id="missing-list"></div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -377,6 +392,51 @@ document.getElementById('si-form').addEventListener('submit', function(e) {
     body: JSON.stringify({section_name: f.section_name.value, school_slug: f.school_slug.value, meal_type: f.meal_type.value})
   }).then(function(r){ if(r.ok||r.status===204) location.reload(); else r.text().then(function(t){alert('Error: '+t);}); });
 });
+
+function scanMissing() {
+  var btn = document.getElementById('scan-btn');
+  var status = document.getElementById('scan-status');
+  var list = document.getElementById('missing-list');
+  btn.disabled = true;
+  status.textContent = 'Scanning…';
+  list.innerHTML = '';
+  fetch('/api/v1/missing-images').then(function(r){ return r.json(); }).then(function(names) {
+    btn.disabled = false;
+    if (!names || names.length === 0) {
+      status.textContent = 'No missing images found.';
+      return;
+    }
+    status.textContent = names.length + ' food' + (names.length === 1 ? '' : 's') + ' without images:';
+    var ul = document.createElement('ul');
+    ul.style.cssText = 'list-style:none;display:flex;flex-direction:column;gap:.35rem;margin-top:.5rem';
+    names.forEach(function(name) {
+      var li = document.createElement('li');
+      li.style.cssText = 'display:flex;align-items:center;gap:.5rem';
+      var lbl = document.createElement('span');
+      lbl.style.cssText = 'font-size:.82rem;color:#334155;flex:1';
+      lbl.textContent = name;
+      var abtn = document.createElement('button');
+      abtn.className = 'add-btn';
+      abtn.style.cssText = 'padding:.2rem .65rem;font-size:.75rem';
+      abtn.textContent = '+ Add Image';
+      abtn.onclick = function() {
+        var fi = document.querySelector('#img-form [name="food_name"]');
+        if (fi) {
+          fi.value = name;
+          document.getElementById('img-form').scrollIntoView({behavior:'smooth', block:'center'});
+          setTimeout(function(){ fi.focus(); }, 250);
+        }
+      };
+      li.appendChild(lbl);
+      li.appendChild(abtn);
+      ul.appendChild(li);
+    });
+    list.appendChild(ul);
+  }).catch(function(err) {
+    btn.disabled = false;
+    status.textContent = 'Error: ' + err.message;
+  });
+}
 </script>
 </body>
 </html>`
