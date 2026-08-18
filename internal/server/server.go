@@ -140,25 +140,44 @@ func (s *Server) sectionIncludes(schoolSlug, mealType string) []string {
 	return inc
 }
 
-// filterSections returns a copy of days with option sections filtered by the include list.
-// Non-option sections (Fruit, Vegetable, Milk, etc.) always pass through.
+// filterSections returns a copy of days with sections filtered and ordered by the include list.
+// For "Option N" style includes (Woodmen Roberts): matching options are kept in includes order,
+// then non-option side sections (Fruit, Vegetable, Milk, etc.) are appended after.
+// For named-section style includes (EMS): ONLY the listed sections are kept, in includes order.
 // If includes is empty, days is returned unchanged.
 func filterSections(days map[string]menu.DayMenu, includes []string) map[string]menu.DayMenu {
 	if len(includes) == 0 {
 		return days
 	}
+	// Detect style: if any include starts with "Option ", treat as Option-N mode.
+	optionMode := false
+	for _, inc := range includes {
+		if strings.HasPrefix(inc, "Option ") {
+			optionMode = true
+			break
+		}
+	}
 	result := make(map[string]menu.DayMenu, len(days))
 	for k, dm := range days {
+		// Collect sections in includes order first.
 		var secs []menu.Section
-		for _, sec := range dm.Sections {
-			if !strings.HasPrefix(sec.Name, "Option") {
-				secs = append(secs, sec)
-				continue
-			}
-			for _, inc := range includes {
+		for _, inc := range includes {
+			for _, sec := range dm.Sections {
 				if strings.EqualFold(sec.Name, inc) {
 					secs = append(secs, sec)
 					break
+				}
+			}
+		}
+		// In Option-N mode, also append non-option side sections not already included.
+		if optionMode {
+			incSet := make(map[string]bool, len(includes))
+			for _, inc := range includes {
+				incSet[strings.ToLower(inc)] = true
+			}
+			for _, sec := range dm.Sections {
+				if !strings.HasPrefix(sec.Name, "Option") && !incSet[strings.ToLower(sec.Name)] {
+					secs = append(secs, sec)
 				}
 			}
 		}
@@ -656,6 +675,7 @@ func writeCalendarPage(w http.ResponseWriter, days map[string]menu.DayMenu, scho
 		"[[TITLE]]", html.EscapeString(school.Name)+" — "+strings.ToUpper(mealType[:1])+mealType[1:]+" — "+monthName+" "+strconv.Itoa(year),
 		"[[MONTH_YEAR]]", monthName+" "+strconv.Itoa(year),
 		"[[SCHOOL]]", html.EscapeString(school.Name),
+		"[[SCHOOL_SHORT]]", html.EscapeString(school.ShortName),
 		"[[MEAL_LABEL]]", strings.ToUpper(mealType[:1])+mealType[1:],
 		"[[SCHOOL_SLUG]]", school.Slug,
 		"[[MEAL]]", mealType,
@@ -945,6 +965,7 @@ func writeWeekPage(w http.ResponseWriter, days map[string]menu.DayMenu, school n
 		"[[TITLE]]", html.EscapeString(school.Name)+" — "+mealLabel+" — "+weekLabel,
 		"[[WEEK_LABEL]]", weekLabel,
 		"[[SCHOOL]]", html.EscapeString(school.Name),
+		"[[SCHOOL_SHORT]]", html.EscapeString(school.ShortName),
 		"[[MEAL_LABEL]]", mealLabel,
 		"[[PREV_DATE]]", prevDate,
 		"[[NEXT_DATE]]", nextDate,
@@ -1113,7 +1134,7 @@ const calendarPage = `<!DOCTYPE html>
       <button class="modal-nav" id="modal-prev" onclick="modalNav(-1)">&#x2039;</button>
       <div class="modal-hdr-mid">
         <div class="modal-title" id="modal-title"></div>
-        <div class="modal-sub">[[SCHOOL]] &middot; [[MEAL_LABEL]]</div>
+        <div class="modal-sub">[[SCHOOL_SHORT]] &middot; [[MEAL_LABEL]]</div>
       </div>
       <button class="modal-nav" id="modal-next" onclick="modalNav(1)">&#x203A;</button>
       <button class="close-btn" onclick="closeModal()">&#x2715;</button>
@@ -1154,10 +1175,13 @@ function openDay(dateStr) {
   document.getElementById('modal-title').textContent =
     d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric', year:'numeric'});
 
-  var sorted = secs.slice().sort(function(a,b){
+  // Only apply ORDER sorting for "Option N" style menus (Woodmen Roberts).
+  // Named-section schools (EMS) already have sections in the correct API order.
+  var hasOptions = secs.some(function(s){ return /^Option \d+$/.test(s.name); });
+  var sorted = hasOptions ? secs.slice().sort(function(a,b){
     var ai = ORDER.indexOf(a.name), bi = ORDER.indexOf(b.name);
     return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
-  });
+  }) : secs;
 
   var html = '';
   for (var i = 0; i < sorted.length; i++) {

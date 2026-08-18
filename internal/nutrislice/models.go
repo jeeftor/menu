@@ -56,22 +56,25 @@ type FoodTag struct {
 
 // School represents a school with its Nutrislice API credentials.
 type School struct {
-	Name     string
-	Slug     string
-	District string
+	Name      string // full display name
+	ShortName string // abbreviated label used in UI (e.g. "WRES", "EMS")
+	Slug      string
+	District  string
 }
 
 // DefaultSchools contains the configured ASD20 schools.
 var DefaultSchools = []School{
 	{
-		Name:     "Woodmen Roberts Elementary",
-		Slug:     "woodmen-roberts-elementary-school",
-		District: "asd20",
+		Name:      "Woodmen Roberts Elementary",
+		ShortName: "WRES",
+		Slug:      "woodmen-roberts-elementary-school",
+		District:  "asd20",
 	},
 	{
-		Name:     "Eagleview Middle School",
-		Slug:     "eagleview-middle-school",
-		District: "asd20",
+		Name:      "Eagleview Middle School",
+		ShortName: "EMS",
+		Slug:      "eagleview-middle-school",
+		District:  "asd20",
 	},
 }
 
