@@ -37,7 +37,7 @@ func New(cfg Config) *Handler {
 		cfg.DefaultMeal = "lunch"
 	}
 	if cfg.DefaultSchool == "" {
-		cfg.DefaultSchool = "woodmen-roberts-elementary-school"
+		cfg.DefaultSchool = "woodman-roberts-elementary-school"
 	}
 	return &Handler{cfg: cfg}
 }
@@ -60,6 +60,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var env RequestEnvelope
 	if err := json.Unmarshal(body, &env); err != nil {
 		slog.Error("alexa: parsing request", "err", err, "remote", r.RemoteAddr, "body", string(body))
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if env.Request == nil {
+		slog.Warn("alexa: missing request object", "remote", r.RemoteAddr)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}

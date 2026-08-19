@@ -65,9 +65,9 @@ type School struct {
 // DefaultSchools contains the configured ASD20 schools.
 var DefaultSchools = []School{
 	{
-		Name:      "Woodmen Roberts Elementary",
+		Name:      "Woodman Roberts Elementary",
 		ShortName: "WRES",
-		Slug:      "woodmen-roberts-elementary-school",
+		Slug:      "woodman-roberts-elementary-school",
 		District:  "asd20",
 	},
 	{

@@ -1,48 +1,66 @@
 {
-  "skillManifest": {
-    "publishingInformation": {
+  "manifest": {
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "sslCertificateType": "Trusted",
+          "uri": "https://menu.vookie.net/alexa"
+        },
+        "interfaces": [],
+        "locales": {}
+      }
+    },
+    "manifestVersion": "1.0",
+    "permissions": [],
+    "privacyAndCompliance": {
+      "allowsPurchases": false,
+      "containsAds": false,
+      "isChildDirected": false,
+      "isExportCompliant": true,
       "locales": {
         "en-US": {
-          "summary": "Ask what's on the school lunch menu for any day of the week.",
+          "privacyPolicyUrl": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/PRIVACY.md",
+          "termsOfUseUrl": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/TERMS.md"
+        }
+      },
+      "shoppingKit": {
+        "isAmazonAssociatesOnAlexaEnabled": false,
+        "isShoppingActionsEnabled": false
+      },
+      "usesPersonalInfo": false
+    },
+    "publishingInformation": {
+      "automaticDistribution": {
+        "isActive": false
+      },
+      "category": "EDUCATION_AND_REFERENCE",
+      "distributionCountries": ["US"],
+      "isAvailableWorldwide": false,
+      "locales": {
+        "en-US": {
+          "description": "Quickly check the school lunch menu at woodman Roberts in Colorado Springs.",
           "examplePhrases": [
             "Alexa, open School Lunch",
             "Alexa, ask School Lunch what's for lunch tomorrow",
             "Alexa, ask School Lunch what is for lunch at school today"
           ],
           "keywords": [
+            "ASD20",
+            "Woodman",
+            "Roberts",
             "school lunch",
             "menu",
             "cafeteria",
             "kids",
             "food"
           ],
-          "name": "School Lunch",
-          "description": "Quickly check the school lunch menu for any day. Just ask, \"Alexa, ask School Lunch what's for lunch tomorrow\" or \"Alexa, ask School Lunch what's on the menu for Monday.\"",
+          "largeIconUri": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/icons/icon-512.png",
+          "name": "Woodman Roberts School Lunch",
           "smallIconUri": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/icons/icon-108.png",
-          "largeIconUri": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/icons/icon-512.png"
+          "summary": "Woodman Roberts ASD20 School lunch skill"
         }
       },
-      "category": "KIDS",
-      "isAvailableWorldwide": false,
-      "distributionCountries": ["US"]
-    },
-    "apis": {
-      "custom": {
-        "endpoint": {
-          "uri": "https://menu.vookie.net/alexa",
-          "sslCertificateType": "Trusted"
-        }
-      }
-    },
-    "privacyAndCompliance": {
-      "locales": {
-        "en-US": {
-          "privacyPolicyUrl": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/PRIVACY.md",
-          "termsOfUseUrl": "https://raw.githubusercontent.com/jeeftor/menu/master/alexa-skill/TERMS.md"
-        }
-      }
-    },
-    "permissions": [],
-    "manifestVersion": "1.0"
+      "testingInstructions": "{\"ask_dist_username\":\"\",\"ask_dist_password\":\"\",\"ask_dist_testing_instructions\":\"There aren't any - just ask what's for lunch today\"}"
+    }
   }
 }

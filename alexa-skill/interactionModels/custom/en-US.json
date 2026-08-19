@@ -1,7 +1,7 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "school lunch",
+      "invocationName": "woodman roberts lunch",
       "intents": [
         {
           "name": "MenuQueryIntent",
@@ -44,6 +44,10 @@
         },
         {
           "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
           "samples": []
         }
       ],
