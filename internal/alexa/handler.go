@@ -44,6 +44,7 @@ func New(cfg Config) *Handler {
 
 // ServeHTTP handles an incoming Alexa request.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	slog.Info("alexa: request started", "method", r.Method, "remote", r.RemoteAddr, "user_agent", r.UserAgent(), "path", r.URL.Path)
 	if r.Method != http.MethodPost {
 		slog.Warn("alexa: rejected non-POST request", "method", r.Method, "remote", r.RemoteAddr)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
