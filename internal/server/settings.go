@@ -195,6 +195,7 @@ const settingsPage = `<!DOCTYPE html>
 <header>
   <h1>⚙ Settings</h1>
   <a class="back-btn" href="/api">API</a>
+  <a class="back-btn" href="/alexa-stats">Alexa Stats</a>
   <a class="back-btn" href="/">← Calendar</a>
 </header>
 

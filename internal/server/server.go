@@ -133,6 +133,7 @@ func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Stor
 	s.mux.HandleFunc("/api/v1/sections", s.handleAPISections)
 	// Settings/config require LAN or OIDC login
 	s.mux.HandleFunc("/settings", s.requireLANOrAuth(s.handleSettings))
+	s.mux.HandleFunc("/alexa-stats", s.requireLANOrAuth(s.handleAlexaStats))
 	s.mux.HandleFunc("/api/v1/food-images", s.requireLANOrAuthForWrites(s.handleAPIFoodImages))
 	s.mux.HandleFunc("/api/v1/favorites", s.requireLANOrAuthForWrites(s.handleAPIFavorites))
 	s.mux.HandleFunc("/api/v1/exclusions", s.requireLANOrAuthForWrites(s.handleAPIExclusions))
