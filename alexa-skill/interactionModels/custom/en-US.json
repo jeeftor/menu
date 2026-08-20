@@ -1,7 +1,7 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "woodman roberts lunch",
+      "invocationName": "school lunch",
       "intents": [
         {
           "name": "MenuQueryIntent",
