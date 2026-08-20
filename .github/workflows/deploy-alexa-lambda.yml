@@ -61,7 +61,16 @@ jobs:
             --function-name menu-alexa \
             --region ${{ secrets.AWS_REGION }}
 
+      - name: Check skill publication status
+        id: skill-status
+        run: |
+          STATUS=$(ask smapi list-skills-for-vendor 2>/dev/null | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); print(next((s['publicationStatus'] for s in d.get('skills',[]) if s['skillId']=='${{ secrets.ASK_SKILL_ID }}'),'UNKNOWN'))")
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "Skill publication status: $STATUS"
+
       - name: Update skill manifest
+        if: steps.skill-status.outputs.status != 'CERTIFICATION'
         run: |
           ask smapi update-skill-manifest \
             -s ${{ secrets.ASK_SKILL_ID }} \
@@ -73,6 +82,7 @@ jobs:
             --resource manifest
 
       - name: Update interaction model
+        if: steps.skill-status.outputs.status != 'CERTIFICATION'
         run: |
           ask smapi set-interaction-model \
             -s ${{ secrets.ASK_SKILL_ID }} \
@@ -83,3 +93,10 @@ jobs:
           ask smapi get-skill-status \
             --skill-id ${{ secrets.ASK_SKILL_ID }} \
             --resource interactionModel
+
+      - name: Skip manifest/model update (skill in certification)
+        if: steps.skill-status.outputs.status == 'CERTIFICATION'
+        run: |
+          echo "Skill is in CERTIFICATION status — manifest and interaction model updates are skipped."
+          echo "Lambda code was deployed successfully."
+          echo "Manifest/model changes will be applied after certification completes."
