@@ -6,6 +6,7 @@ on:
       - master
     paths:
       - 'alexa-lambda/**'
+      - 'alexa-skill/**'
   workflow_dispatch:
 
 jobs:
@@ -16,22 +17,69 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
-      - name: Package Lambda
-        run: cd alexa-lambda && zip -r /tmp/menu-alexa-lambda.zip index.mjs package.json
-      - name: Deploy Lambda
+
+      - name: Install ASK CLI
+        run: npm install -g ask-cli@2.30.7
+
+      - name: Configure ASK CLI profile
         run: |
+          mkdir -p ~/.ask
+          cat > ~/.ask/cli_config <<'EOF'
+          {
+            "profiles": {
+              "default": {
+                "token": {
+                  "refresh_token": "${{ secrets.ASK_REFRESH_TOKEN }}",
+                  "token_type": "bearer",
+                  "expires_in": 3600,
+                  "expires_at": "2000-01-01T00:00:00.000Z"
+                },
+                "vendor_id": "${{ secrets.ASK_VENDOR_ID }}"
+              }
+            }
+          }
+          EOF
+
+      - name: Refresh ASK token
+        run: ask util generate-aws-profile || true
+
+      - name: Deploy Lambda code
+        run: |
+          cd alexa-lambda && zip -r /tmp/menu-alexa-lambda.zip index.mjs package.json
           aws lambda update-function-code \
             --function-name menu-alexa \
             --zip-file fileb:///tmp/menu-alexa-lambda.zip \
             --region ${{ secrets.AWS_REGION }}
-      - name: Wait for update to complete
-        run: |
           aws lambda wait function-updated \
             --function-name menu-alexa \
             --region ${{ secrets.AWS_REGION }}
+
+      - name: Update skill manifest
+        run: |
+          ask smapi update-skill-manifest \
+            -s ${{ secrets.ASK_SKILL_ID }} \
+            -g development \
+            --manifest 'file:alexa-skill/skill.json'
+          sleep 10
+          ask smapi get-skill-status \
+            --skill-id ${{ secrets.ASK_SKILL_ID }} \
+            --resource manifest
+
+      - name: Update interaction model
+        run: |
+          ask smapi set-interaction-model \
+            -s ${{ secrets.ASK_SKILL_ID }} \
+            -g development \
+            -l en-US \
+            --interaction-model 'file:alexa-skill/interactionModels/custom/en-US.json'
+          sleep 15
+          ask smapi get-skill-status \
+            --skill-id ${{ secrets.ASK_SKILL_ID }} \
+            --resource interactionModel
