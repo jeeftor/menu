@@ -3,8 +3,22 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+func TestSecurityHeadersPermitCalendarInlineInteractions(t *testing.T) {
+	handler := (&Server{}).securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/calendar", nil))
+
+	if csp := rr.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
+		t.Fatalf("calendar's inline interaction handlers must be permitted by CSP: %q", csp)
+	}
+}
 
 func TestRequireLANOrAuth(t *testing.T) {
 	// Without sessions: WAN blocked, LAN allowed.
