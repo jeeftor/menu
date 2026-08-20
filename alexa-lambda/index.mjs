@@ -79,16 +79,30 @@ async function handleRequest(event) {
 
 async function handleMenuQuery(request) {
   const slot = request.intent?.slots?.date;
+  const today = todayInZone(TIME_ZONE);
+  const tomorrow = addDays(today, 1);
+
+  // No date specified → return both today and tomorrow
   if (!slot || !slot.value) {
-    return alexaResponse(
-      'Please ask what\'s for lunch today or tomorrow.',
-      false
-    );
+    const todaySummary = await fetchDaySummary(today);
+    const tomorrowTarget = await nextSchoolDay(tomorrow);
+
+    const parts = [];
+    if (todaySummary && todaySummary.text) {
+      parts.push(`For lunch today, ${todaySummary.text}.`);
+    } else {
+      parts.push('There is nothing on the menu today.');
+    }
+    if (tomorrowTarget) {
+      const weekday = formatWeekday(tomorrowTarget.date);
+      parts.push(`Tomorrow is ${weekday}. The food will be ${tomorrowTarget.text}.`);
+    } else {
+      parts.push('There is nothing on the menu for the next few days.');
+    }
+    return alexaResponse(parts.join(' '), true);
   }
 
   const slotDate = slot.value;
-  const today = todayInZone(TIME_ZONE);
-  const tomorrow = addDays(today, 1);
 
   if (slotDate === today) {
     const summary = await fetchDaySummary(today);
