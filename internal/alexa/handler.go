@@ -37,7 +37,7 @@ func New(cfg Config) *Handler {
 		cfg.DefaultMeal = "lunch"
 	}
 	if cfg.DefaultSchool == "" {
-		cfg.DefaultSchool = "woodman-roberts-elementary-school"
+		cfg.DefaultSchool = "woodmen-roberts-elementary-school"
 	}
 	return &Handler{cfg: cfg}
 }

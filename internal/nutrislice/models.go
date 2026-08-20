@@ -67,7 +67,7 @@ var DefaultSchools = []School{
 	{
 		Name:      "Woodman Roberts Elementary",
 		ShortName: "WRES",
-		Slug:      "woodman-roberts-elementary-school",
+		Slug:      "woodmen-roberts-elementary-school",
 		District:  "asd20",
 	},
 	{

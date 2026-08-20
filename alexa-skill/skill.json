@@ -4,7 +4,7 @@
       "custom": {
         "endpoint": {
           "sslCertificateType": "Trusted",
-          "uri": "https://menu.vookie.net/alexa"
+          "uri": "https://menu-alexa.jeffstein.workers.dev/alexa"
         },
         "interfaces": [],
         "locales": {}

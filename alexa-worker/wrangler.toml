@@ -1,0 +1,10 @@
+name = "menu-alexa"
+main = "src/index.js"
+compatibility_date = "2026-08-19"
+workers_dev = true
+
+[vars]
+SKILL_ID = "amzn1.ask.skill.bb4abeb4-8246-4cd2-9245-47bc28fb8374"
+DEFAULT_SCHOOL = "woodmen-roberts-elementary-school"
+DEFAULT_MEAL = "lunch"
+DISTRICT = "asd20"
