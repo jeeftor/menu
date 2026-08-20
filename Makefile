@@ -1,4 +1,4 @@
-.PHONY: build run test clean show serve cf-deploy
+.PHONY: build run test clean show serve lambda-deploy
 
 BINARY := bin/menu
 
@@ -22,9 +22,13 @@ clean:
 lint:
 	go vet ./...
 
-cf-deploy:
-	@set -a; [ -f ../homelab/caddy/.env ] && . ../homelab/caddy/.env; set +a; \
-	export CLOUDFLARE_EMAIL="$$CF_EMAIL"; \
-	export CLOUDFLARE_API_KEY="$$CF_GLOBAL_API_KEY"; \
-	export CLOUDFLARE_ACCOUNT_ID="$$CF_ACCOUNT_ID"; \
-	cd alexa-worker && npx -y wrangler@3 deploy
+lambda-deploy:
+	cd alexa-lambda && zip -r /tmp/menu-alexa-lambda.zip index.mjs package.json
+	aws lambda update-function-code \
+		--function-name menu-alexa \
+		--zip-file fileb:///tmp/menu-alexa-lambda.zip \
+		--region us-east-1
+	aws lambda wait function-updated \
+		--function-name menu-alexa \
+		--region us-east-1
+	@echo "Lambda deployed: arn:aws:lambda:us-east-1:260672429786:function:menu-alexa"

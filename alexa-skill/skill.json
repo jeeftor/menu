@@ -3,8 +3,7 @@
     "apis": {
       "custom": {
         "endpoint": {
-          "sslCertificateType": "Trusted",
-          "uri": "https://menu-alexa.jeffstein.workers.dev/alexa"
+          "uri": "arn:aws:lambda:us-east-1:260672429786:function:menu-alexa"
         },
         "interfaces": [],
         "locales": {}
