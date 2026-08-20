@@ -5,7 +5,7 @@
  * response. No inbound traffic to the homelab LAN is required.
  *
  * Supported requests:
- *   - "open woodman roberts lunch"                    → welcome prompt
+ *   - "open woodman roberts"                         → welcome prompt
  *   - "what's for lunch today"                        → today's menu or "nothing today"
  *   - "what's for lunch tomorrow"                     → next school day's menu (skips weekends)
  *   - "help" / "stop" / "cancel"

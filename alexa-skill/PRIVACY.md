@@ -8,7 +8,7 @@ The **School Lunch** Alexa skill lets you ask about the school lunch menu for a 
 
 ## Information we collect
 
-When you use this skill, Amazon sends the following information to our server at `https://menu.vookie.net/alexa`:
+When you use this skill, Amazon sends the following information to our AWS Lambda endpoint:
 
 - The date you asked about (for example, "tomorrow", "Monday", or a specific date)
 - Your Alexa request metadata (timestamp, request ID, and device locale)
@@ -25,7 +25,7 @@ We do not sell, share, or transfer any data to third parties. The menu content i
 
 ## Security
 
-All requests between Alexa and our server are sent over HTTPS and verified using Amazon's request signature mechanism.
+All requests between Alexa and our Lambda function are transmitted over HTTPS via AWS. Access to the Lambda function is restricted to the Alexa Skills Kit trigger with skill ID verification.
 
 ## Changes to this policy
 

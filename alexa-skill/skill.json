@@ -39,9 +39,9 @@
         "en-US": {
           "description": "Quickly check the school lunch menu at woodman Roberts in Colorado Springs.",
           "examplePhrases": [
-            "Alexa, open School Lunch",
-            "Alexa, ask School Lunch what's for lunch tomorrow",
-            "Alexa, ask School Lunch what is for lunch at school today"
+            "Alexa, open Woodman Roberts",
+            "Alexa, ask Woodman Roberts what's for lunch today",
+            "Alexa, ask Woodman Roberts what's for lunch tomorrow"
           ],
           "keywords": [
             "ASD20",
@@ -59,7 +59,7 @@
           "summary": "Woodman Roberts ASD20 School lunch skill"
         }
       },
-      "testingInstructions": "{\"ask_dist_username\":\"\",\"ask_dist_password\":\"\",\"ask_dist_testing_instructions\":\"There aren't any - just ask what's for lunch today\"}"
+      "testingInstructions": "{\"ask_dist_username\":\"\",\"ask_dist_password\":\"\",\"ask_dist_testing_instructions\":\"Say 'Alexa, open Woodman Roberts' to launch the skill. Then ask 'what's for lunch today' or 'what's for lunch tomorrow' to hear the school lunch menu. The skill fetches data from the public Nutrislice API for Woodmen Roberts Elementary School in ASD20.\"}"
     }
   }
 }

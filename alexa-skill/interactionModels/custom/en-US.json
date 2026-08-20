@@ -1,7 +1,7 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "school lunch",
+      "invocationName": "woodman roberts",
       "intents": [
         {
           "name": "MenuQueryIntent",
@@ -32,15 +32,28 @@
         },
         {
           "name": "AMAZON.HelpIntent",
-          "samples": []
+          "samples": [
+            "help",
+            "what can you do",
+            "what can I ask",
+            "how do I use this"
+          ]
         },
         {
           "name": "AMAZON.CancelIntent",
-          "samples": []
+          "samples": [
+            "cancel",
+            "never mind",
+            "forget it"
+          ]
         },
         {
           "name": "AMAZON.StopIntent",
-          "samples": []
+          "samples": [
+            "stop",
+            "that's all",
+            "thanks"
+          ]
         },
         {
           "name": "AMAZON.FallbackIntent",
