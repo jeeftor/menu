@@ -2,7 +2,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -13,9 +12,9 @@ import (
 	"strings"
 	"time"
 
+	homelabauth "github.com/jeeftor/homelab-auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"menu/internal/auth"
 	"menu/internal/menu"
 	"menu/internal/nutrislice"
 	"menu/internal/store"
@@ -90,8 +89,7 @@ type Server struct {
 	mcpServer    *mcp.Server
 	store        *store.Store
 	alexaHandler http.Handler
-	oidc         *auth.OIDCProvider
-	sessions     *auth.SessionManager
+	oidc         *homelabauth.Provider
 	limiter      *rateLimiter
 	authLimiter  *rateLimiter
 }
@@ -106,8 +104,7 @@ type AlexaConfig struct {
 
 // AuthConfig holds optional OIDC / session settings. Nil disables web login.
 type AuthConfig struct {
-	OIDC     auth.OIDCConfig
-	Sessions *auth.SessionManager
+	Provider *homelabauth.Provider
 }
 
 // New creates a Server bound to the given port. st may be nil if no persistence is needed.
@@ -122,9 +119,8 @@ func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Stor
 		limiter:     newRateLimiter(time.Minute/60, 60), // 60 req/min per IP
 		authLimiter: newRateLimiter(time.Minute/10, 10), // 10 req/min per IP
 	}
-	if authCfg != nil {
-		s.oidc = mustInitOIDC(authCfg.OIDC, authCfg.Sessions)
-		s.sessions = authCfg.Sessions
+	if authCfg != nil && authCfg.Provider != nil {
+		s.oidc = authCfg.Provider
 	}
 	s.mux.HandleFunc("/", s.handleRoot)
 	s.mux.HandleFunc("/calendar", s.handleCalendar)
@@ -144,7 +140,7 @@ func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Stor
 	s.mux.HandleFunc("/api/v1/section-includes/order", s.requireLANOrAuthForWrites(s.handleAPISectionIncludesOrder))
 	s.mux.HandleFunc("/api/v1/missing-images", s.requireLANOrAuthForWrites(s.handleAPIMissingImages))
 	// OIDC login flow — stricter rate limits
-	if s.oidc != nil && s.oidc.Enabled() {
+	if s.oidc != nil {
 		s.mux.HandleFunc("/login", s.strictRateLimitMiddleware(http.HandlerFunc(s.oidc.LoginHandler)).ServeHTTP)
 		s.mux.HandleFunc("/callback", s.strictRateLimitMiddleware(http.HandlerFunc(s.oidc.CallbackHandler)).ServeHTTP)
 		s.mux.HandleFunc("/logout", s.strictRateLimitMiddleware(http.HandlerFunc(s.oidc.LogoutHandler)).ServeHTTP)
@@ -159,18 +155,6 @@ func New(client *nutrislice.Client, port int, mcpSrv *mcp.Server, st *store.Stor
 	// MCP — Streamable HTTP transport
 	s.mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv }, nil))
 	return s
-}
-
-func mustInitOIDC(cfg auth.OIDCConfig, sm *auth.SessionManager) *auth.OIDCProvider {
-	if cfg.Issuer == "" || cfg.ClientID == "" {
-		return nil
-	}
-	provider, err := auth.NewOIDCProvider(context.Background(), cfg, sm)
-	if err != nil {
-		slog.Warn("failed to initialize OIDC provider; login disabled", "err", err)
-		return nil
-	}
-	return provider
 }
 
 // Start begins listening on the configured port.
@@ -199,11 +183,11 @@ func isWAN(r *http.Request) bool {
 
 // isAuthenticated returns true if the request has a valid session cookie.
 func (s *Server) isAuthenticated(r *http.Request) bool {
-	if s.sessions == nil {
+	if s.oidc == nil {
 		return false
 	}
-	_, err := s.sessions.SessionFromRequest(r)
-	return err == nil
+	_, ok := s.oidc.IdentityFromRequest(r)
+	return ok
 }
 
 // requireLANOrAuth blocks WAN requests unless the user is authenticated via OIDC.
@@ -232,14 +216,13 @@ func (s *Server) requireLANOrAuthForWrites(next http.HandlerFunc) http.HandlerFu
 // pageAuth returns the settings visibility and an auth link for the request.
 func (s *Server) pageAuth(r *http.Request) (showSettings bool, authLink string) {
 	showSettings = !isWAN(r) || s.isAuthenticated(r)
-	if s.sessions == nil || s.oidc == nil || !s.oidc.Enabled() {
+	if s.oidc == nil {
 		return
 	}
-	sess, err := s.sessions.SessionFromRequest(r)
-	if err == nil && sess != nil {
+	if _, ok := s.oidc.IdentityFromRequest(r); ok {
 		// Just show a Logout button; the user's name/email isn't useful here and
 		// many IdPs don't consistently populate the "name" claim.
-		authLink = `<a class="nav-btn" href="/logout">Logout</a>`
+		authLink = `<form method="post" action="/logout" class="logout-form"><button class="nav-btn" type="submit">Logout</button></form>`
 		return
 	}
 	authLink = `<a class="nav-btn" href="/login">Login</a>`
@@ -1199,7 +1182,7 @@ const calendarPage = `<!DOCTYPE html>
     .hdr-left p{font-size:.8rem;color:#94A3B8;margin-top:.15rem}
     .ver-badge{font-size:.65rem;color:#475569;background:#1E293B;border:1px solid #334155;padding:.1rem .45rem;border-radius:20px;vertical-align:middle;margin-left:.4rem;font-weight:500}
     .month-nav{display:flex;gap:.5rem;align-items:center}
-    .nav-btn{background:#1E293B;border:1px solid #334155;color:#CBD5E1;padding:.4rem .9rem;border-radius:6px;cursor:pointer;font-size:.85rem;text-decoration:none;transition:background .15s;white-space:nowrap}
+    .logout-form{margin:0}.nav-btn{background:#1E293B;border:1px solid #334155;color:#CBD5E1;padding:.4rem .9rem;border-radius:6px;cursor:pointer;font-size:.85rem;text-decoration:none;transition:background .15s;white-space:nowrap}
     .nav-btn:hover{background:#334155;color:#fff}
     .today-link{font-size:.7rem;color:#60A5FA;text-decoration:none;border:1px solid #1E3A5F;border-radius:20px;padding:.08rem .5rem;margin-left:.5rem;transition:all .15s;vertical-align:middle}
     .today-link:hover{background:#1E3A5F;color:#BFDBFE}
@@ -1533,7 +1516,7 @@ const weekPage = `<!DOCTYPE html>
     .hdr-left p{font-size:.8rem;color:#94A3B8;margin-top:.15rem}
     .ver-badge{font-size:.65rem;color:#475569;background:#1E293B;border:1px solid #334155;padding:.1rem .45rem;border-radius:20px;vertical-align:middle;margin-left:.4rem;font-weight:500}
     .hdr-right{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
-    .nav-btn{background:#1E293B;border:1px solid #334155;color:#CBD5E1;padding:.4rem .9rem;border-radius:6px;font-size:.85rem;text-decoration:none;transition:background .15s;white-space:nowrap}
+    .logout-form{margin:0}.nav-btn{background:#1E293B;border:1px solid #334155;color:#CBD5E1;padding:.4rem .9rem;border-radius:6px;font-size:.85rem;text-decoration:none;transition:background .15s;white-space:nowrap}
     .nav-btn:hover{background:#334155;color:#fff}
     .today-link{font-size:.7rem;color:#60A5FA;text-decoration:none;border:1px solid #1E3A5F;border-radius:20px;padding:.08rem .5rem;margin-left:.5rem;transition:all .15s;vertical-align:middle}
     .today-link:hover{background:#1E3A5F;color:#BFDBFE}

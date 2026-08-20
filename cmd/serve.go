@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -8,10 +10,10 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	homelabauth "github.com/jeeftor/homelab-auth"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"menu/internal/auth"
 	"menu/internal/mcpserver"
 	"menu/internal/nutrislice"
 	"menu/internal/server"
@@ -69,18 +71,23 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	var authCfg *server.AuthConfig
 	if sessionSecret := viper.GetString("session_secret"); sessionSecret != "" {
-		sm, err := auth.NewSessionManager(sessionSecret)
+		secret, err := base64.StdEncoding.DecodeString(sessionSecret)
 		if err != nil {
-			return fmt.Errorf("session manager: %w", err)
+			return fmt.Errorf("decoding session secret: %w", err)
+		}
+		provider, err := homelabauth.New(context.Background(), homelabauth.Config{
+			Issuer:        viper.GetString("oidc_issuer"),
+			ClientID:      viper.GetString("oidc_client_id"),
+			ClientSecret:  viper.GetString("oidc_client_secret"),
+			RedirectURL:   viper.GetString("oidc_redirect_url"),
+			SessionSecret: secret,
+			Logger:        slog.Default(),
+		})
+		if err != nil {
+			return fmt.Errorf("initializing OIDC: %w", err)
 		}
 		authCfg = &server.AuthConfig{
-			OIDC: auth.OIDCConfig{
-				Issuer:       viper.GetString("oidc_issuer"),
-				ClientID:     viper.GetString("oidc_client_id"),
-				ClientSecret: viper.GetString("oidc_client_secret"),
-				RedirectURL:  viper.GetString("oidc_redirect_url"),
-			},
-			Sessions: sm,
+			Provider: provider,
 		}
 	}
 
